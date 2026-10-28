@@ -94,7 +94,7 @@ index 22f56bb..3850739 100644
  	 * would hash a whole 16 KiB unit out of a single mapped 4 KiB page and
 diff --git a/config/MASTER.arm64.oxygen b/config/MASTER.arm64.oxygen
 new file mode 100644
-index 0000000..5a1dc73
+index 0000000..2bb4048
 --- /dev/null
 +++ b/config/MASTER.arm64.oxygen
 @@ -0,0 +1,115 @@
@@ -102,7 +102,7 @@ index 0000000..5a1dc73
 +# oxygen (Xiaomi Mi Max 2, MSM8953): MASTER.arm64.sweet adapted for Cortex-A53
 +# 4 KiB translation granule, open-source arm64 assembly and pmap (nos_arm_asm,
 +# nos_arm_pmap). Same machine-independent options as santoni; the OXYGEN board
-+# header selects the 1080x1920 32bpp panel paths.
++# header selects the 1080x1920 BGR24 panel paths.
 +#
 +#
 +# Mach Operating System
@@ -299,7 +299,7 @@ index 4421451..fad18b7 100644
  ARM64_PLKSEG_ADDR  =0xfffffff004004000
  ARM64_LINK_ADDR    =0xfffffff007004000
 diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
-index 65ff160..5bccbf1 100644
+index 65ff160..644ccab 100644
 --- a/osfmk/arm64/arm_vm_init.c
 +++ b/osfmk/arm64/arm_vm_init.c
 @@ -1841,7 +1841,9 @@ static void
@@ -308,7 +308,7 @@ index 65ff160..5bccbf1 100644
  	const vm_map_address_t va = SWEET_EARLY_FB_VA;
 -#if defined(SANTONI)
 +#if defined(OXYGEN)
-+	assert(va + 5 * ARM_TT_L2_SIZE <= gVirtBase);
++	assert(va + 4 * ARM_TT_L2_SIZE <= gVirtBase);
 +#elif defined(SANTONI)
  	assert(va + 2 * ARM_TT_L2_SIZE <= gVirtBase);
  #else
@@ -320,13 +320,13 @@ index 65ff160..5bccbf1 100644
 -#if defined(SANTONI)
 +#if defined(OXYGEN)
 +	/*
-+	 * oxygen: 1080x1920x4 at 0x90001000 fits in four 2MB blocks; map five
-+	 * (0x90000000 - 0x90a00000) so the early console keeps a guard block.
++	 * oxygen: 1080x1920x3 at 0x90001000 fits in three 2MB blocks; map four
++	 * (0x90000000 - 0x90800000) so the early console keeps a guard block.
 +	 */
-+	for (unsigned int i = 1; i < 5; i++) {
++	for (unsigned int i = 1; i < 4; i++) {
 +		assert(slot[i] == ARM_TTE_EMPTY);
 +	}
-+	for (unsigned int i = 0; i < 5; i++) {
++	for (unsigned int i = 0; i < 4; i++) {
 +		slot[i] = (0x90000000ULL + (uint64_t)i * ARM_TT_L2_SIZE) |
 +		    ARM_TTE_VALID | ARM_TTE_TYPE_BLOCK |
 +		    ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) |
@@ -338,20 +338,22 @@ index 65ff160..5bccbf1 100644
  	slot[0] = 0x90000000ULL | ARM_TTE_VALID | ARM_TTE_TYPE_BLOCK |
  	    ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) |
 diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
-index 079cda3..cda20c3 100644
+index 079cda3..f516fd4 100644
 --- a/osfmk/arm64/start.s
 +++ b/osfmk/arm64/start.s
-@@ -513,7 +513,16 @@ LEXT(start_first_cpu)
+@@ -513,7 +513,18 @@ LEXT(start_first_cpu)
  	mov		x20, x0
  	mov		x21, #0
  
 -#if defined(SANTONI)
 +#if defined(OXYGEN)
-+	/* Stage 0: white first 32 rows of the 1080x1920 32bpp panel (MMU off) */
++	/* Stage 0: white first 32 rows of the 1080x1920 BGR24 panel (MMU off) */
 +	MOV64	x0, 0x90001000
 +	mov		w1, #-1
 +	mov		x2, #(1080 * 32)
-+1:	str		w1, [x0], #4
++1:	strb	w1, [x0], #1
++	strb	w1, [x0], #1
++	strb	w1, [x0], #1
 +	subs	x2, x2, #1
 +	b.ne	1b
 +	dsb		sy
@@ -359,22 +361,22 @@ index 079cda3..cda20c3 100644
  	/* Stage 0: write white pixels to simplefb (0x90001000) with MMU off */
  	MOV64	x0, 0x90001000
  	mov		w1, #-1
-@@ -687,7 +696,27 @@ Lkernelcache_base_found:
+@@ -687,7 +698,27 @@ Lkernelcache_base_found:
  	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
  	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
  
 -#if defined(SANTONI)
 +#if defined(OXYGEN)
 +	/*
-+	 * Splash framebuffer: five 2MB Normal-NC blocks (0x90000000 - 0x90a00000)
-+	 * in the EXISTING V=P L2 table. The 1080x1920x4 ABL continuous-splash
-+	 * window at 0x90001000 needs four; the fifth is a guard block. Both
++	 * Splash framebuffer: four 2MB Normal-NC blocks (0x90000000 - 0x90800000)
++	 * in the EXISTING V=P L2 table. The 1080x1920x3 ABL continuous-splash
++	 * window at 0x90001000 needs three; the fourth is a guard block. Both
 +	 * framebuffer and RAM use L1 index 0. In 4K mode all bring-up RAM is
 +	 * below 4GB, so the first V=P L2 page is bootstrap_pagetables +
 +	 * 2*PGBYTES.
 +	 */
 +	MOV64	x10, 0x90000000
-+	mov	x9, #5
++	mov	x9, #4
 +1:	MOV64	x11, (ARM_TTE_TYPE_BLOCK | ARM_TTE_VALID | ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) | ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_WRITECOMB) | ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX)
 +	orr	x11, x11, x10
 +	and	x12, x10, #(ARM_TT_L2_INDEX_MASK)
@@ -388,18 +390,21 @@ index 079cda3..cda20c3 100644
  	/*
  	 * Splash framebuffer: two 2MB Normal-NC blocks (0x90000000 - 0x90400000)
  	 * in the EXISTING V=P L2 table. Both framebuffer and RAM use L1 index 0.
-@@ -868,7 +897,16 @@ common_start:
+@@ -868,7 +899,19 @@ common_start:
  	MSR_SCTLR_EL1_X0
  	isb		sy
  
 -#if defined(SANTONI)
 +#if defined(OXYGEN)
-+	/* Stage 1: blue band after the white one (32 rows of 1080 32bpp pixels) */
-+	MOV64	x0, (0x90001000 + 1080 * 32 * 4)
++	/* Stage 1: blue band after the white one (32 rows of 1080 BGR24 pixels) */
++	MOV64	x0, (0x90001000 + 1080 * 32 * 3)
 +	mov		w1, #0xff
-+	mov		x2, #(1080 * 32)
-+1:	str		w1, [x0], #4
-+	subs	x2, x2, #1
++	mov		w2, #0
++	mov		x3, #(1080 * 32)
++1:	strb	w1, [x0], #1
++	strb	w2, [x0], #1
++	strb	w2, [x0], #1
++	subs	x3, x3, #1
 +	b.ne	1b
 +	dsb		sy
 +#elif defined(SANTONI)
@@ -407,7 +412,7 @@ index 079cda3..cda20c3 100644
  	MOV64	x0, (0x90001000 + 720 * 32 * 4)
  	mov		w1, #0xff
 diff --git a/osfmk/arm64/sweet_early.c b/osfmk/arm64/sweet_early.c
-index 0940d2c..ba01122 100644
+index 0940d2c..ef6312e 100644
 --- a/osfmk/arm64/sweet_early.c
 +++ b/osfmk/arm64/sweet_early.c
 @@ -11,7 +11,19 @@
@@ -416,60 +421,53 @@ index 0940d2c..ba01122 100644
  
 -#if defined(SANTONI)
 +#if defined(OXYGEN)
-+/* Mi Max 2: 1080x1920 32bpp BGRA continuous splash at 0x90001000. */
-+static volatile uint32_t *early_fb = (volatile uint32_t *)(uintptr_t)0x90001000;
++/* Mi Max 2: 1080x1920 BGR24 continuous splash at 0x90001000. */
++static volatile uint8_t *early_fb = (volatile uint8_t *)(uintptr_t)0x90001000;
 +#define EARLY_FB early_fb
-+#define EARLY_WIDTH 1080u
-+#define EARLY_HEIGHT 1920u
-+#define EARLY_STRIDE (4320u / 4)
++#define EARLY_W 1080u
++#define EARLY_H 1920u
++#define EARLY_STRIDE 3240u
 +#define EARLY_SCALE 2u
 +#define EARLY_CELL_W (8u * EARLY_SCALE)
 +#define EARLY_CELL_H (16u * EARLY_SCALE)
-+#define EARLY_ROWS ((EARLY_HEIGHT - 32u) / EARLY_CELL_H)
-+#define EARLY_COLS (EARLY_WIDTH / EARLY_CELL_W)
++#define EARLY_ROWS ((EARLY_H - 32u) / EARLY_CELL_H)
++#define EARLY_COLS (EARLY_W / EARLY_CELL_W)
 +#elif defined(SANTONI)
  static volatile uint8_t *early_fb = (volatile uint8_t *)(uintptr_t)0x90001000;
  #define EARLY_FB early_fb
  #define EARLY_W 720u
-@@ -52,7 +64,7 @@ static unsigned int early_started, early_disabled, early_panicking;
- static void
- sweet_early_clear_row(void)
- {
--#if defined(SANTONI)
-+#if defined(SANTONI) && !defined(OXYGEN)
- 	for (unsigned int y = 0; y < EARLY_CELL_H; y++) {
- 		for (unsigned int x = 0; x < EARLY_W; x++) {
- 			early_pixel24(x, early_row * EARLY_CELL_H + y, 0x00000000u);
-@@ -93,7 +105,7 @@ sweet_early_putc(char c)
- 	const unsigned char *glyph = iso_font + (unsigned char)c * 16;
- 	for (unsigned int gy = 0; gy < 16; gy++) {
- 		for (unsigned int sy = 0; sy < EARLY_SCALE; sy++) {
--#if defined(SANTONI)
-+#if defined(SANTONI) && !defined(OXYGEN)
- 			unsigned int py = early_row * EARLY_CELL_H + gy * EARLY_SCALE + sy;
- 			for (unsigned int gx = 0; gx < 8; gx++) {
- 				uint32_t pixel = (glyph[gy] & (1u << gx)) ? 0x00ffffffu : 0x00000000u;
-@@ -132,7 +144,7 @@ sweet_early_mark(unsigned int stage, const char *label)
- 		return;
- 	}
- 	uint32_t color = 0xff00ff00u | ((stage & 7u) * 32u << 16);
--#if defined(SANTONI)
-+#if defined(SANTONI) && !defined(OXYGEN)
- 	for (unsigned int y = (EARLY_H > 32 ? EARLY_H - 32 : 0); y < EARLY_H; y++) {
- 		for (unsigned int x = stage * 48; x < (stage + 1) * 48; x++) {
- 			early_pixel24(x, y, color);
-@@ -187,8 +199,10 @@ void
- sweet_early_relocate(uint64_t base)
- {
- 	sweet_early_mark(8, "leaving bootstrap TTBR0");
--#if defined(SANTONI)
-+#if defined(SANTONI) && !defined(OXYGEN)
- 	early_fb = (volatile uint8_t *)(uintptr_t)(base + 0x1000);
-+#elif defined(OXYGEN)
-+	early_fb = (volatile uint32_t *)(uintptr_t)(base + 0x1000);
+@@ -22,14 +34,6 @@ static volatile uint8_t *early_fb = (volatile uint8_t *)(uintptr_t)0x90001000;
+ #define EARLY_CELL_H (16u * EARLY_SCALE)
+ #define EARLY_ROWS (EARLY_H / EARLY_CELL_H)
+ #define EARLY_COLS (EARLY_W / EARLY_CELL_W)
+-
+-static inline void early_pixel24(unsigned int x, unsigned int y, uint32_t c) {
+-	if (x >= EARLY_W || y >= EARLY_H) return;
+-	volatile uint8_t *p = EARLY_FB + (y * EARLY_STRIDE) + (x * 3);
+-	p[0] = (uint8_t)(c & 0xff);        // Blue
+-	p[1] = (uint8_t)((c >> 8) & 0xff); // Green
+-	p[2] = (uint8_t)((c >> 16) & 0xff);// Red
+-}
  #else
- 	early_fb = (volatile uint32_t *)(uintptr_t)base;
+ static volatile uint32_t *early_fb = (volatile uint32_t *)(uintptr_t)0x9c000000;
+ #define EARLY_FB early_fb
+@@ -43,6 +47,16 @@ static volatile uint32_t *early_fb = (volatile uint32_t *)(uintptr_t)0x9c000000;
+ #define EARLY_COLS (EARLY_WIDTH / EARLY_CELL_W)
  #endif
+ 
++#if defined(SANTONI)		/* oxygen also defines SANTONI */
++static inline void early_pixel24(unsigned int x, unsigned int y, uint32_t c) {
++	if (x >= EARLY_W || y >= EARLY_H) return;
++	volatile uint8_t *p = EARLY_FB + (y * EARLY_STRIDE) + (x * 3);
++	p[0] = (uint8_t)(c & 0xff);        // Blue
++	p[1] = (uint8_t)((c >> 8) & 0xff); // Green
++	p[2] = (uint8_t)((c >> 16) & 0xff);// Red
++}
++#endif
++
+ extern unsigned char iso_font[256 * 16];
+ 
+ /* Initialized data must remain writable until disable, including panics. */
 diff --git a/osfmk/console/serial_console.c b/osfmk/console/serial_console.c
 index 6d1b177..8117b26 100644
 --- a/osfmk/console/serial_console.c
@@ -526,7 +524,7 @@ index 02bcc0f..4fe7eef 100644
  
 diff --git a/pexpert/pexpert/arm64/OXYGEN.h b/pexpert/pexpert/arm64/OXYGEN.h
 new file mode 100644
-index 0000000..dee53f4
+index 0000000..3fb0d54
 --- /dev/null
 +++ b/pexpert/pexpert/arm64/OXYGEN.h
 @@ -0,0 +1,38 @@
@@ -540,7 +538,7 @@ index 0000000..dee53f4
 + * Xiaomi Mi Max 2 ("oxygen", MSM8953). It shares the QGIC2, SDCC1, GCC,
 + * APPS watchdog, 8x Cortex-A53 topology and 4 KiB pages with santoni, so the
 + * inner SANTONI define keeps that bring-up. OXYGEN only selects the
-+ * 1080x1920 32bpp panel geometry in the early console and bootstrap map.
++ * 1080x1920 BGR24 panel geometry in the early console and bootstrap map.
 + */
 +#define OXYGEN                        1
 +#define SANTONI                       1

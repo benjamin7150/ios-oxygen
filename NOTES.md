@@ -13,27 +13,29 @@
   `mmcblk0p66`. Carve-outs: `other_ext@0x84a00000`, `modem@0x86c00000`,
   `adsp_fw@0x8d600000`, `wcnss@0x8e800000`, `splash@0x90001000` size
   `0x13ff000` (ends exactly at `0x91400000`), `dfps@0x90000000` (disabled),
-  `ramoops@0xb0000000`. Android `fb0` reports 1080x1920, 32 bpp, stride 4320;
-  ABL continuous splash lives at `0x90001000`. (If real colours come out wrong,
-  the fallback is 24 bpp / stride 3240.)
-- **Kernel (0145-oxygen-board-target.patch, 16 files / 30 hunks):** new
+  `ramoops@0xb0000000`. Android `fb0` reports 1080x1920, 32 bpp, stride 4352,
+  virtual 1080x3840 (double-buffered mdss buffer); that is **not** the ABL
+  continuous-splash window. The ABL splash at `0x90001000` is packed **BGR24**
+  (stride 3240), confirmed on hardware (see the shim boot result below).
+- **Kernel (0145-oxygen-board-target.patch, 16 files / 28 hunks):** new
   `ARM64_BOARD_CONFIG_OXYGEN` MACHINE_CONFIG (`config/MASTER.arm64.oxygen`,
   `pexpert/.../OXYGEN.h`). It defines both `ARM64_BOARD_CONFIG_OXYGEN` and
   `ARM64_BOARD_CONFIG_SWEET`; `OXYGEN.h` additionally defines the inner
   `OXYGEN`, `SANTONI` and `SWEET` macros so every santoni bring-up branch
   (SDHCI, serial console, UBC/dyld-cache 4K fix, vm_shared_region, topaz
   cpufreq/battery exclusion, FIQ/GICv2) is shared. Oxygen-specific: early
-  console 1080x1920 BGRA32 at scale 2, `start.s` maps five 2 MiB Normal-NC
-  blocks (`0x90000000..0x90a00000`) and `arm_vm_init` keeps a five-block final
-  alias; RAM is `0x91400000..0xafe00000` (492 MiB, below ramoops).
+  console 1080x1920 BGR24 at scale 2 (`EARLY_STRIDE 3240`), `start.s` maps
+  four 2 MiB Normal-NC blocks (`0x90000000..0x90800000`, three for the 6.2 MiB
+  splash plus one guard) and `arm_vm_init` keeps a four-block final alias;
+  RAM is `0x91400000..0xafe00000` (492 MiB, below ramoops).
 - **Shim:** `shim/board.h` selects santoni or oxygen (`-DBOARD_OXYGEN`);
-  the console has a generic BGR/BGRA pixel writer; the loader reports
-  `FB_BPP*8` depth / board stride; MMU maps the exact 2 MiB span (four blocks
-  on oxygen); `build.sh [payload] --board oxygen` passes `--native` to
+  the console is 24-bit BGR on both boards; the loader reports `FB_BPP*8`
+  depth / board stride; MMU maps the exact 2 MiB span (three blocks on
+  oxygen); `build.sh [payload] --board oxygen` passes `--native` to
   `mkadt.py`; host/loader tests are board-aware.
 - **Synthetic ADT:** `tools/mkadt.py` now has per-board profiles and identity.
   Oxygen: `dram-base 0x91400000`, `dram-size 0x1ec00000`, fbcon 1080x1920
-  depth 32 stride 4320, native canvas 1080x1920, `display-scale 3`, root
+  depth 24 stride 3240, native canvas 1080x1920, `display-scale 3`, root
   compatible `D21AP|iPhone10,2|xiaomi,oxygen|xiaomi,sweet|qcom,msm8953|AppleARM`,
   chip-id `0x8015`, and `home-button-type 1`. The real D21AP ADT has
   `home-button-type = 1` (D22AP has 2), so the earlier "omit it" plan was
@@ -53,21 +55,33 @@
   `82234051...c2b04de1`); `shim/build.sh` already appends that exact path.
   The live `/sys/firmware/fdt` (`resources/oxygen.dtb`, 271,211 B) is the
   same tree with ABL's `/chosen` bootargs/initrd added.
-- **Local shim build:** no clang/lld on this host, but the shim builds cleanly
-  with `aarch64-linux-gnu-gcc` + `aarch64-linux-gnu-ld` (entry 0, no
-  relocations, 180,224 B Image). A shim-only oxygen boot image with the stock
-  appended FDT and an empty cpio ramdisk is at
-  `/tmp/shim-gcc/shim-oxygen-test.img` (454,656 B, sha256 `babe270b...870fbdd`).
-  It stops at `LOADER no SWEETXNU payload` after painting the 1080x1920
-  console, which is still a useful panel/board smoke test.
-- **Tests/CI:** `tests/run_tests.sh` gained `OXY-01`; full suite passes locally
-  with `CC=gcc HOST_CC=gcc`. The workflow skip guard now also fails if
-  `014[2345]-(santoni|oxygen)` is skipped. `gh` is not installed here and there
-  are no git credentials, so the GitHub build/push was intentionally skipped
-  per user instruction; the oxygen kernel build has **not** run yet.
+- **Shim hardware test (2026-10-28, non-destructive `fastboot boot`):**
+  no clang/lld on this host, but the shim builds cleanly with
+  `aarch64-linux-gnu-gcc` + `aarch64-linux-gnu-ld` (entry 0, no relocations,
+  180,224 B Image). The first 32bpp/stride-4320 image
+  (`/home/moron/ios/shim-oxygen-test.img`, 454,656 B, sha256
+  `babe270b...870fbdd`) painted a white background; some text was present but
+  sheared/unreadable. Rebuilt with `FB_BPP 3`/stride 3240:
+  `/home/moron/ios/shim-oxygen-24bpp.img` (454,656 B, sha256
+  `29c49537...aba0096`) booted with a **red background and clean text**,
+  ending at `LOADER no SWEETXNU payload` / `HALT payload load failed`
+  (expected with the empty ramdisk). This confirms the oxygen ABL
+  continuous-splash window is **BGR24 at 0x90001000, stride 3240**. No
+  partitions were written; Android rebooted afterward.
+- **Tests/CI (2026-10-28):** `tests/run_tests.sh` gained `OXY-01`;
+  `CC=gcc HOST_CC=gcc bash tests/run_tests.sh` passes all host tests, all
+  patch structure checks and OXY-01. `python3 tools/check_patch.py
+  xnu/patches/0145-oxygen-board-target.patch` is clean (16 files, 28 hunks)
+  and `git apply --check` succeeds against a clean post-0144 tree
+  (`/tmp/xnu-verify`). The workflow skip guard now also fails if
+  `014[2345]-(santoni|oxygen)` is skipped. `gh` is not installed here and
+  there are no git credentials, so the GitHub build/push was intentionally
+  skipped per user instruction; the oxygen kernel itself has **not** been
+  compiled.
 - **Open items:**
-  1. Build the OXYGEN kernel (CI or another Mac) and fix compile errors;
-     then pack it with `shim/build.sh <kernel> --board oxygen`.
+  1. Build the OXYGEN kernel (another Mac, or a local XNU build environment)
+     and fix compile errors; then pack it with
+     `shim/build.sh <kernel> --board oxygen`.
   2. Display identity: the real iPhone 8 Plus UI is 414x736 pt @3x
      (1242x2208 canvas) while our native canvas is 1080x1920 @3x
      (360x640 pt, not a real screen size; UIKit's "No status bar visual
@@ -76,12 +90,17 @@
      the D21AP 1242x2208 logical canvas and downscale (MDP or CPU) to the
      1080x1920 panel, or verify that the 8 Plus frameworks use the product
      type's fixed bounds. Record the observed result after the first boot.
-  3. No hardware boot attempted yet; Android data and all partitions are
-     untouched (the persistent console log stays off unless `sweetlog=1`).
-- **Next concrete action:** boot the prepared shim-only image with
-  `adb reboot bootloader` + `fastboot boot /tmp/shim-gcc/shim-oxygen-test.img`
-  after user confirmation (non-destructive), observe the 1080x1920 console,
-  then build/obtain the oxygen kernel and repeat with the full payload.
+  3. The shim-only hardware boot has passed; the **full kernel** payload has
+     not been booted. Android data and all partitions are untouched (the
+     persistent console log stays off unless `sweetlog=1`).
+- **Commits (branch `santoni`, not pushed):** `4843f14` (board target),
+  `e20be29` (D21AP HomeButtonType); the 24bpp shim/ADT/kernel-patch follow-up
+  is the next commit after `e20be29` (see `git log`).
+- **Next concrete action:** obtain an oxygen kernel build and run
+  `shim/build.sh <kernel> --board oxygen`; validate the resulting boot image
+  with the loader tests, then `fastboot boot` it after user confirmation.
+  The 24bpp shim-only image is already hardware-confirmed, so do not repeat
+  that boot unless the board profile changes.
 
 ## dff9f18 (2026-10-22): fix EL1 permission fault on `/dev/remmcroot0` reads
 

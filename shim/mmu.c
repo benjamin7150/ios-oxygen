@@ -122,8 +122,8 @@ int mmu_enable(struct mmu_info *info)
 	/*
 	 * Framebuffer blocks: mark the splash window Normal-NC so the CPU-written
 	 * console pixels are visible. Cover the whole 2 MiB-aligned span the board
-	 * framebuffer lives in (santoni 4 MiB @ 0x90000000; oxygen ~8.3 MiB @
-	 * 0x90001000, so 0x90000000 .. 0x90800000 i.e. four 2 MiB blocks).
+	 * framebuffer lives in (santoni 4 MiB @ 0x90000000; oxygen ~6 MiB @
+	 * 0x90001000, so 0x90000000 .. 0x90600000 i.e. three 2 MiB blocks).
 	 */
 	uint64_t fb_span_beg = FB_PHYS & ~(L2_BLK_SIZE - 1);
 	uint64_t fb_span_end = (FB_PHYS + (uint64_t)FB_W * FB_H * FB_BPP + L2_BLK_SIZE - 1) & ~(L2_BLK_SIZE - 1);

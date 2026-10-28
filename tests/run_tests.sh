@@ -231,20 +231,20 @@ python3 tools/check_patch.py "$P142" -q \
 	--added-lacks 'bsd/dev/santoni_sdhci.c:return physio('
 echo "ok   0142 never hands a user VA to memcpy and keeps the cdev lock off uiomove"
 
-echo "== OXY-01: oxygen is a santoni sibling with a 1080x1920 32bpp panel (0145) =="
+echo "== OXY-01: oxygen is a santoni sibling with a 1080x1920 BGR24 panel (0145) =="
 python3 tools/check_patch.py "$P145" -q \
 	--added-contains 'pexpert/pexpert/arm64/OXYGEN.h:#define OXYGEN                        1' \
 	--added-contains 'pexpert/pexpert/arm64/OXYGEN.h:#define SANTONI                       1' \
 	--added-contains 'pexpert/pexpert/arm64/board_config.h:#ifdef ARM64_BOARD_CONFIG_OXYGEN' \
 	--added-contains 'makedefs/MakeInc.def:MACHINE_FLAGS_ARM64_OXYGEN = -DARM64_BOARD_CONFIG_OXYGEN -DARM64_BOARD_CONFIG_SWEET' \
 	--added-contains 'config/MASTER.arm64.oxygen:# oxygen (Xiaomi Mi Max 2, MSM8953)' \
-	--added-contains 'osfmk/arm64/start.s:Stage 0: white first 32 rows of the 1080x1920 32bpp panel' \
-	--added-contains 'osfmk/arm64/sweet_early.c:#define EARLY_WIDTH 1080u' \
-	--added-contains 'osfmk/arm64/sweet_early.c:#define EARLY_HEIGHT 1920u' \
-	--added-contains 'osfmk/arm64/sweet_early.c:#define EARLY_STRIDE (4320u / 4)' \
+	--added-contains 'osfmk/arm64/start.s:Stage 0: white first 32 rows of the 1080x1920 BGR24 panel' \
+	--added-contains 'osfmk/arm64/sweet_early.c:#define EARLY_W 1080u' \
+	--added-contains 'osfmk/arm64/sweet_early.c:#define EARLY_H 1920u' \
+	--added-contains 'osfmk/arm64/sweet_early.c:#define EARLY_STRIDE 3240u' \
 	--added-contains 'osfmk/arm64/arm_vm_init.c:0x90000000ULL + (uint64_t)i * ARM_TT_L2_SIZE' \
 	--added-contains 'osfmk/console/serial_console.c:#if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)'
-echo "ok   0145 adds the OXYGEN target, 1080x1920 32bpp early console and five-block NC alias"
+echo "ok   0145 adds the OXYGEN target, 1080x1920 BGR24 early console and four-block NC alias"
 
 # Optional deep check: if a patched XNU source tree is provided, the patches
 # must also apply to it as-is (git apply --check).

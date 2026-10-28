@@ -1,6 +1,6 @@
 /*
  * Minimal text console on the ABL splash framebuffer.
- * santoni: 720x1280 24-bit BGR (b8g8r8).  oxygen: 1080x1920 32-bit BGRA.
+ * Both boards: 24-bit BGR (b8g8r8): santoni 720x1280, oxygen 1080x1920.
  * With the MMU off every access is Device memory: byte writes ensure strict alignment.
  */
 #include "console.h"

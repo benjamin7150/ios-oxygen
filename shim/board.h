@@ -13,16 +13,17 @@
 /*
  * Xiaomi Mi Max 2 "oxygen" (MSM8953).
  *
- * Framebuffer: 1080x1920 continuous splash at 0x90001000. Android's fb0
- * reports 32bpp, and the splash carve-out (0x13ff000 ~20 MiB) comfortably
- * holds a 1080x1920x4 buffer; ABL programs it as BGRA32 (x8r8g8b8). If the
- * physical splash turns out to be packed 24bpp instead, set FB_BPP 3 and
- * FB_STRIDE (1080*3) after checking the on-screen colours.
+ * Framebuffer: 1080x1920 continuous splash at 0x90001000. The stock DTB's
+ * panel nodes say qcom,mdss-dsi-bpp = 0x18 (24 bpp), and the first 32bpp
+ * shim boot came up white/garbled: the buffer ABL keeps scanning is packed
+ * BGR24, not BGRA32. Android's later fb0 is 32bpp but that is the mdss
+ * driver's own buffer, not the continuous-splash window. If the panel turns
+ * out to be 32bpp after all, set FB_BPP 4 and FB_STRIDE (1080*4).
  */
 #	define FB_BASE		0x90001000UL
 #	define FB_W			1080
 #	define FB_H			1920
-#	define FB_BPP		4		/* bytes per pixel */
+#	define FB_BPP		3		/* bytes per pixel, BGR24 */
 #	define FB_STRIDE	(FB_W * FB_BPP)
 
 /* Kernel-managed RAM: above every Qualcomm carve-out incl. the live splash.

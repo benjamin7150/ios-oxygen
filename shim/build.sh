@@ -3,7 +3,7 @@
 #
 # Usage:  build.sh [payload] [--board santoni|oxygen]
 #   santoni (default): Redmi 4X, MSM8937.
-#   oxygen:            Mi Max 2, MSM8953 (1080x1920 32bpp FB, 4 GiB, iPhone 8+ identity).
+#   oxygen:            Mi Max 2, MSM8953 (1080x1920 BGR24 FB, 4 GiB, iPhone 8+ identity).
 set -euo pipefail
 
 BOARD="santoni"

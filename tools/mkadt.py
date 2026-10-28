@@ -27,7 +27,7 @@ BOARDS = {
         # Mi Max 2 (MSM8953). Carve-outs run to the splash region ending at
         # 0x91400000; the free gap 0x91400000..0xb0000000 (492 MiB) holds XNU.
         phys_base=0x91400000, mem_size=0x1ec00000,  # 492 MiB
-        fb=0x90001000, fb_w=1080, fb_h=1920, fb_bpp=4,  # BGRA32
+        fb=0x90001000, fb_w=1080, fb_h=1920, fb_bpp=3,  # BGR24 (cont-splash)
         model='oxygen', ecid=0x4f585947454e0201, display_scale=3,
     ),
 }
