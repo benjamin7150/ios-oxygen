@@ -256,7 +256,16 @@ for s in xnu/patches/0019-stage-libpthread.sh \
 		exit 1
 	fi
 done
+python3 tools/check_patch.py xnu/patches/0019-sweet-builtin-pthread.patch -q \
+	--added-contains 'bsd/conf/Makefile.template:ifneq ($(filter SWEET SANTONI OXYGEN,$(CURRENT_MACHINE_CONFIG)),)'
+python3 tools/check_patch.py xnu/patches/0020-sweet-portable-aes-cbc.patch -q \
+	--added-contains 'libkern/conf/Makefile.template:ifneq ($(filter SWEET SANTONI OXYGEN,$(CURRENT_MACHINE_CONFIG)),)'
+python3 tools/check_patch.py xnu/patches/0026-sweet-builtin-hfs.patch -q \
+	--added-contains 'bsd/conf/Makefile.template:-include $(SWEET_HFS_ROOT)/sweet_hfs_compat.h' \
+	--added-contains 'bsd/sweet_hfs/sweet_hfs_compat.h:#include <sys/vnode_internal.h>' \
+	--added-contains 'bsd/sweet_hfs/sweet_hfs_compat.h:#include <libkern/sysctl.h>'
 echo "ok   0019/0020/0026 stage libpthread, BearSSL and HFS for oxygen"
+echo "ok   the Makefile gates enable their include paths for OXYGEN"
 
 echo "== CI-01: Xcode 16 iig expects the kernel-side IORPC.kernelContent field (0146) =="
 python3 tools/check_patch.py "$P146" -q \
