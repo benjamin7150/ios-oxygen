@@ -22,6 +22,7 @@ P142="xnu/patches/0142-santoni-sdhci-emmc-driver.patch"
 P143="xnu/patches/0143-santoni-persistent-console-log.patch"
 P144="xnu/patches/0144-santoni-4k-unsigned-dyld-cache.patch"
 P145="xnu/patches/0145-oxygen-board-target.patch"
+P146="xnu/patches/0146-iig-kernelcontent.patch"
 
 echo "== host unit tests (-Wall -Wextra) =="
 for t in test_sdhci_mock test_gpt_parser test_log_ring; do
@@ -246,13 +247,20 @@ python3 tools/check_patch.py "$P145" -q \
 	--added-contains 'osfmk/console/serial_console.c:#if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)'
 echo "ok   0145 adds the OXYGEN target, 1080x1920 BGR24 early console and four-block NC alias"
 
+echo "== CI-01: Xcode 16 iig expects the kernel-side IORPC.kernelContent field (0146) =="
+python3 tools/check_patch.py "$P146" -q \
+	--added-contains 'iokit/IOKit/IORPC.h:#ifdef KERNEL' \
+	--added-contains 'iokit/IOKit/IORPC.h:IORPCMessage     * kernelContent;'
+echo "ok   0146 adds IORPC.kernelContent for Xcode 16 iig builds"
+
 # Optional deep check: if a patched XNU source tree is provided, the patches
 # must also apply to it as-is (git apply --check).
 if [ -n "${XNU_SRC:-}" ]; then
 	echo "== git apply --check against XNU_SRC=$XNU_SRC =="
 	(cd "$XNU_SRC" && git apply --check \
-	    "$OLDPWD/$P142" "$OLDPWD/$P143" "$OLDPWD/$P144" "$OLDPWD/$P145")
-	echo "ok   all four patches apply to $XNU_SRC"
+	    "$OLDPWD/$P142" "$OLDPWD/$P143" "$OLDPWD/$P144" "$OLDPWD/$P145" \
+	    "$OLDPWD/$P146")
+	echo "ok   all five patches apply to $XNU_SRC"
 fi
 
 echo "run_tests: all hosts tests, patch checks and shipped-code assertions passed"

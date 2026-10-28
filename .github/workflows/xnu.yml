@@ -12,6 +12,9 @@ on:
       machine_config:
         description: xnu MACHINE_CONFIG
         default: SANTONI
+      runner:
+        description: macOS runner label (macos-14 = Xcode 15; macos-15-intel = Xcode 16 + 0146)
+        default: macos-14
       keep_going:
         description: make -k (collect all compile errors in one run)
         default: "true"
@@ -42,9 +45,10 @@ env:
 
 jobs:
   build:
-    # macos-14 still ships Xcode 15.x: its iig matches the xnu-8796 IORPC ABI
-    # (Xcode 16's iig emits IORPC.kernelContent, which this xnu lacks)
-    runs-on: macos-14
+    # macos-14 still ships Xcode 15.x: its iig matches xnu-8796 natively.
+    # macos-15-intel (Xcode 16) works with 0146, which adds the kernel-side
+    # IORPC.kernelContent field emitted by Xcode 16's iig.
+    runs-on: ${{ inputs.runner || 'macos-14' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -122,11 +126,11 @@ jobs:
           if [ ! -f build.log ]; then
             echo "no build.log (build never started)"; exit 0
           fi
-          if grep -E 'Skipping patch .*014[2345]-(santoni|oxygen)' build.log; then
-            echo "::error::a Santoni storage or oxygen board patch was skipped by the build"
+          if grep -E 'Skipping patch .*014[23456]-(santoni|oxygen|iig)' build.log; then
+            echo "::error::a Santoni storage, oxygen board or iig compatibility patch was skipped by the build"
             exit 1
           fi
-          echo "no Santoni storage or oxygen board patch skipped"
+          echo "no Santoni storage, oxygen board or iig compatibility patch skipped"
 
       - name: Package build tree for local compiles
         if: always()
