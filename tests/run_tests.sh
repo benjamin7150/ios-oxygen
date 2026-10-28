@@ -267,6 +267,19 @@ python3 tools/check_patch.py xnu/patches/0026-sweet-builtin-hfs.patch -q \
 echo "ok   0019/0020/0026 stage libpthread, BearSSL and HFS for oxygen"
 echo "ok   the Makefile gates enable their include paths for OXYGEN"
 
+echo "== OXY-03: the shim ADT walker marks the live boot CPU (0x100 and 0x0) =="
+for boot_phys in 0x100 0x0; do
+	bin="$OUT/loader_test_${boot_phys#0x}"
+	"$CC" -O2 -Wall -Wextra -Ishim -DBOARD_OXYGEN \
+		-DLOADER_TEST_BOOT_PHYS="$boot_phys" \
+		shim/loader_test.c shim/loader.c -o "$bin"
+	case "$bin" in
+		/*) "$bin" ;;
+		*)  "./$bin" ;;
+	esac
+done
+echo "ok   the shim changes only the executing CPU's /cpus state"
+
 echo "== CI-01: Xcode 16 iig expects the kernel-side IORPC.kernelContent field (0146) =="
 python3 tools/check_patch.py "$P146" -q \
 	--added-contains 'iokit/IOKit/IORPC.h:#ifdef KERNEL' \

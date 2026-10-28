@@ -8,7 +8,11 @@
 #include "console.h"
 #include "loader.h"
 
-char _end[4096] __attribute__((aligned(4096)));
+#ifndef LOADER_TEST_BOOT_PHYS
+#define LOADER_TEST_BOOT_PHYS 0x100
+#endif
+
+char _end[4096] __attribute__((aligned(4096))) = { 1 };
 volatile uint8_t *con_fb = NULL;
 
 void con_clear(uint32_t bg) { (void)bg; }
@@ -72,6 +76,39 @@ struct boot_args {
 static uint8_t fake_ram[0x20000] __attribute__((aligned(4096)));
 static uint8_t fake_payload[0x10000] __attribute__((aligned(4096)));
 
+static uint8_t *adt_node_header(uint8_t *p, uint32_t nprops, uint32_t nchildren)
+{
+	*(uint32_t *)(p + 0) = nprops;
+	*(uint32_t *)(p + 4) = nchildren;
+	return p + 8;
+}
+
+static uint8_t *adt_prop(uint8_t *p, const char *name, const void *value, uint32_t len)
+{
+	memset(p, 0, 36);
+	memcpy(p, name, strlen(name));
+	*(uint32_t *)(p + 32) = len;
+	memcpy(p + 36, value, len);
+	return p + 36 + ((len + 3) & ~3u);
+}
+
+static uint32_t build_cpu_adt(uint8_t *adt, size_t state_off[2])
+{
+	uint8_t *p = adt_node_header(adt, 0, 2);
+	const char *state = "stopped";
+	const uint32_t regs[2] = { 0x100, 0x0 };
+
+	for (unsigned i = 0; i < 2; i++) {
+		p = adt_node_header(p, 3, 0);
+		p = adt_prop(p, "device_type", "cpu", 4);
+		p = adt_prop(p, "reg", &regs[i], 4);
+		uint8_t *state_prop = p;
+		p = adt_prop(p, "state", state, 8);
+		state_off[i] = (size_t)(state_prop + 36 - adt);
+	}
+	return (uint32_t)(p - adt);
+}
+
 int main(void)
 {
 	memset(fake_ram, 0x55, sizeof(fake_ram));
@@ -87,7 +124,8 @@ int main(void)
 	p->entry_va = 0xfffffff007000000UL;
 	p->kernel_end = p->virt_base + 0x2000UL;
 	p->adt_off = 0x500;
-	p->adt_size = 0x80;
+	size_t state_off[2];
+	p->adt_size = build_cpu_adt(fake_payload + 0x500, state_off);
 	snprintf(p->cmdline, sizeof(p->cmdline), "console=null santoni");
 
 	p->segs[0].vmaddr = 0xfffffff007000000UL;
@@ -96,7 +134,6 @@ int main(void)
 	p->segs[0].file_size = 0x1000UL;
 
 	memset(fake_payload + 0x800, 0xaa, 0x1000);
-	memset(fake_payload + 0x500, 0xbb, 0x80);
 
 	mock_rd_start = (uintptr_t)fake_payload;
 	mock_rd_end = (uintptr_t)fake_payload + sizeof(fake_payload);
@@ -114,14 +151,18 @@ int main(void)
 		assert(fake_ram[i] == 0x00);
 	}
 
-	/* Check ADT */
-	for (size_t i = 0; i < 0x80; i++) {
-		assert(fake_ram[0x2000 + i] == 0xbb);
+	/* Check that the boot CPU's ADT state was changed, and only that one. */
+	if (LOADER_TEST_BOOT_PHYS == 0x100) {
+		assert(memcmp(fake_ram + 0x2000 + state_off[0], "running\0", 8) == 0);
+		assert(memcmp(fake_ram + 0x2000 + state_off[1], "stopped\0", 8) == 0);
+	} else {
+		assert(memcmp(fake_ram + 0x2000 + state_off[0], "stopped\0", 8) == 0);
+		assert(memcmp(fake_ram + 0x2000 + state_off[1], "running\0", 8) == 0);
 	}
 
 	/* Check boot_args */
 	uintptr_t adt_pa = (uintptr_t)fake_ram + 0x2000;
-	uintptr_t ba_pa = (adt_pa + 0x80 + PAGE_4K - 1) & ~(PAGE_4K - 1);
+	uintptr_t ba_pa = (adt_pa + p->adt_size + PAGE_4K - 1) & ~(PAGE_4K - 1);
 	assert((ba_pa & 0xfff) == 0);
 
 	struct boot_args *ba = (struct boot_args *)ba_pa;

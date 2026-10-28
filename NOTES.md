@@ -8,8 +8,10 @@
 - **Live hardware facts** (from oxygen's running Android FDT, saved as
   `resources/oxygen.dtb`, sha256 `7f010cd5...73701c`; `resources/` is ignored):
   SDCC1 `0x7824900`/`0x7824000`, QGIC2 `0xb000000`/`0xb002000`, APPS WDT
-  `0xb017000`, GCC `0x1800000`, boot core cluster1/core0 MPIDR `0x100`, 8x
-  Cortex-A53, GICv2, 19.2 MHz timebase, vtimer INTID 20, `userdata` =
+  `0xb017000`, GCC `0x1800000`, 8x Cortex-A53 with `/cpus` at MPIDR
+  `0x000..0x003` (cluster 0) and `0x100..0x103` (cluster 1); the first
+  payload boot showed the shim must not assume the static `0x100` state.
+  GICv2, 19.2 MHz timebase, vtimer INTID 20, `userdata` =
   `mmcblk0p66`. Carve-outs: `other_ext@0x84a00000`, `modem@0x86c00000`,
   `adsp_fw@0x8d600000`, `wcnss@0x8e800000`, `splash@0x90001000` size
   `0x13ff000` (ends exactly at `0x91400000`), `dfps@0x90000000` (disabled),
@@ -89,18 +91,51 @@
   contains `kernel.development.oxygen` (17,297,400 B, Mach-O arm64, sha256
   `c95614cfb33fe273ae00621c49822b51abcf380dbd98bccfb48a0ad40fb47c05`)
   with the `SWEET HFS: hfs-627.100.6 registered` string.
-- **Payload:** packed with `/tmp/opencode/build_oxygen_payload.sh`, the
-  24bpp shim (`/tmp/shim-gcc24/Image`), the oxygen DTB and static
+- **Old payload (panicked):** packed with
+  `/tmp/opencode/build_oxygen_payload.sh`, the 24bpp shim
+  (`/tmp/shim-gcc24/Image`), the oxygen DTB and static
   `/tmp/opencode/init-test/init.macho` (16,635 B). Payload sha256
   `8c0684b3ce5d805c0a83e97a8fa583936c5a0990c789ef708f9116c8e6935129`;
   boot image sha256
   `fbd7c16db74744330a859f35997213c42fc4b1eaf3805169378ffab55b8a4bbe`
-  (17,446,912 B). The image is staged at
-  `/storage/emulated/0/shim-boot.img` and its on-device sha256 matches.
+  (17,446,912 B). This is the image that produced the first panic.
+- **First full-payload boot (2026-10-29, non-destructive
+  `fastboot boot`):**
+  ```
+  SWEET EARLY PANIC: machine_routines.c:1244 Assertion failed:
+  cpu_id <= (unsigned int) ml_get_max_cpu_number()
+  ```
+  No partitions were written; the device rebooted to Android. Root cause:
+  `shim/loader.c:adt_walk_fix_cpus()` tested the `device_type` property at
+  `pname[6] == 't'`, but `device_type` has `'_'` at index 6 and `'t'` at
+  index 7, so `is_cpu` stayed false and no `/cpus` node state was rewritten.
+  The ADT's static `running` state is on `0x100`; the panic is consistent
+  with the executing core not matching that node. In that case
+  `ml_parse_cpu_topology()` saw no boot CPU, `ml_get_cpu_number_local()`
+  returned `(unsigned)-1`, and the assert fired. The fixed shim records the
+  actual `BOOT_CPU` on screen so the next boot confirms it.
+- **Shim fix:** exact `device_type`/`reg`/`state` name checks; the executing
+  core is read from `MPIDR_EL1` and only its `/cpus` state is set to
+  `running` (all others `stopped`). `shim/loader_test.c` now builds a small
+  ADT with CPUs `0x100` and `0x000` and verifies the rewrite for both boot
+  IDs; `tests/run_tests.sh` runs both as **OXY-03**. Fixed shim base (before
+  the appended DTB): `/tmp/opencode/shim-final/shim-base.img`, 180,224 B,
+  sha256 `c0ffd2ad5a60dd4decfa34036ddc99c345689003a659bd1a33f5f34e724192ec`.
+  Fixed shim+DTB Image: 450,471 B, sha256
+  `e698b1ef10db02c612ea1ab6aeff805896bcb2521e42467448bbf0efe0360947`.
+  The previous fixed payload accidentally had the DTB appended twice; the
+  clean build now appends it once.
+- **Fixed payload (clean, staged, not yet booted):** payload sha256
+  `9c36f8e7e048040abfd1128688249e4edcf461b89a949e65885aa0681fae8725`
+  (16,722,064 B); boot image
+  `/tmp/opencode/oxygen-payload-fixed-clean/shim-boot.img`, sha256
+  `e44d745fdaf1dc7115ef9212d05f563f352ff14858fa6ec0eac2be1df2e3f07b`
+  (17,176,576 B). It is staged at `/storage/emulated/0/shim-boot.img` and
+  the on-device sha256 matches the host file.
 - **Open items:**
-  1. Boot the full payload. The staged image has not been booted; the
-     24bpp shim-only image was already hardware-confirmed, so the pending
-     test is specifically the oxygen kernel + HFS + PID 1 payload.
+  1. Boot the fixed payload and record `BOOT_CPU`, the loader output and
+     whether the oxygen kernel/HFS/PID 1 path gets past the old
+     `machine_routines.c:1244` panic.
   2. Display identity: the real iPhone 8 Plus UI is 414x736 pt @3x
      (1242x2208 canvas) while our native canvas is 1080x1920 @3x
      (360x640 pt, not a real screen size; UIKit's "No status bar visual
@@ -117,8 +152,10 @@
   (OXYGEN staging) and `bf8d73c` (OXYGEN gates + HFS compat) on `ci-x64`.
   Both branches are pushed to `fork`.
 - **Next concrete action:** ask before `adb reboot bootloader`; then run
-  the non-destructive `fastboot boot /storage/emulated/0/shim-boot.img`.
-  Record the displayed loader/panic output and update this section.
+  `fastboot boot /tmp/opencode/oxygen-payload-fixed-clean/shim-boot.img`.
+  `fastboot` must use the host path; `/storage/emulated/0/shim-boot.img` is
+  only the on-device backup. Record `BOOT_CPU`, the displayed loader/panic
+  output and update this section.
 
 ## dff9f18 (2026-10-22): fix EL1 permission fault on `/dev/remmcroot0` reads
 

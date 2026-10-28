@@ -115,7 +115,10 @@ static uintptr_t adt_walk_fix_cpus(uintptr_t base, uintptr_t off, uintptr_t tota
 		if (val_off + padded_ln > total_size)
 			return total_size;
 
-		if (pname[0] == 'd' && pname[1] == 'e' && pname[6] == 't') { /* "device_type" */
+		if (pname[0] == 'd' && pname[1] == 'e' && pname[2] == 'v' &&
+		    pname[3] == 'i' && pname[4] == 'c' && pname[5] == 'e' &&
+		    pname[6] == '_' && pname[7] == 't' && pname[8] == 'y' &&
+		    pname[9] == 'p' && pname[10] == 'e' && pname[11] == '\0') {
 			volatile const char *v = (volatile const char *)(base + val_off);
 			if (ln >= 4 && v[0] == 'c' && v[1] == 'p' && v[2] == 'u' && v[3] == '\0')
 				is_cpu = 1;
@@ -148,13 +151,18 @@ static uintptr_t adt_walk_fix_cpus(uintptr_t base, uintptr_t off, uintptr_t tota
 const char *loader_boot(uintptr_t dtb)
 {
 	uint64_t rd_start, rd_end;
-	uintptr_t emb = ((uintptr_t)_end + 0xfff) & ~0xfffUL;
+	uintptr_t emb = 0;
 
 	/*
 	 * Payload can ride either behind the shim in the kernel Image (embedded),
-	 * or inside the ABL-passed initrd via /chosen.
+	 * or inside the ABL-passed initrd via /chosen. The embedded path is only
+	 * meaningful in the freestanding image; the host unit test uses the
+	 * initrd mock and has no mapped shim Image behind _end.
 	 */
-	if (magic_ok((const char *)emb)) {
+#if !__STDC_HOSTED__
+	emb = ((uintptr_t)_end + 0xfff) & ~0xfffUL;
+#endif
+	if (emb && magic_ok((const char *)emb)) {
 		rd_start = emb;
 		rd_end = emb + 0x8000000;
 		con_hex("EMBED", emb);
@@ -219,7 +227,10 @@ const char *loader_boot(uintptr_t dtb)
 	__asm__ volatile("mrs %0, mpidr_el1" : "=r"(mpidr));
 	uint32_t boot_phys = (uint32_t)(mpidr & 0xffff);
 #else
-	uint32_t boot_phys = 0x100;
+#ifndef LOADER_TEST_BOOT_PHYS
+#define LOADER_TEST_BOOT_PHYS 0x100
+#endif
+	uint32_t boot_phys = LOADER_TEST_BOOT_PHYS;
 #endif
 	adt_walk_fix_cpus(adt_pa, 0, p->adt_size, boot_phys);
 	con_hex2("BOOT_CPU", "mpidr=", boot_phys, "adt=", adt_pa);
