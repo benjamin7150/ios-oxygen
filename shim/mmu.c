@@ -119,10 +119,18 @@ int mmu_enable(struct mmu_info *info)
 		l2_2[i] = pa | DEV_FLAGS | D_BLOCK;
 	}
 
-	/* Framebuffer blocks: 0x90000000 and 0x90200000 (covers 4 MiB continuous splash) */
-	uint64_t fb_idx = (0x90000000UL - 0x80000000UL) >> L2_BLK_SHIFT;
-	l2_2[fb_idx]     = 0x90000000UL | NC_FLAGS | D_BLOCK;
-	l2_2[fb_idx + 1] = 0x90200000UL | NC_FLAGS | D_BLOCK;
+	/*
+	 * Framebuffer blocks: mark the splash window Normal-NC so the CPU-written
+	 * console pixels are visible. Cover the whole 2 MiB-aligned span the board
+	 * framebuffer lives in (santoni 4 MiB @ 0x90000000; oxygen ~8.3 MiB @
+	 * 0x90001000, so 0x90000000 .. 0x90800000 i.e. four 2 MiB blocks).
+	 */
+	uint64_t fb_span_beg = FB_PHYS & ~(L2_BLK_SIZE - 1);
+	uint64_t fb_span_end = (FB_PHYS + (uint64_t)FB_W * FB_H * FB_BPP + L2_BLK_SIZE - 1) & ~(L2_BLK_SIZE - 1);
+	for (uint64_t a = fb_span_beg; a < fb_span_end; a += L2_BLK_SIZE) {
+		uint64_t i = (a - 0x80000000UL) >> L2_BLK_SHIFT;
+		l2_2[i] = a | NC_FLAGS | D_BLOCK;
+	}
 
 	/* Map shim image with 4 KiB L3 table */
 	if (img_lo >= 0x20000000UL && img_hi <= 0x40000000UL) {

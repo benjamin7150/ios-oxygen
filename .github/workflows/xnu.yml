@@ -122,11 +122,11 @@ jobs:
           if [ ! -f build.log ]; then
             echo "no build.log (build never started)"; exit 0
           fi
-          if grep -E 'Skipping patch .*014[234]-santoni' build.log; then
-            echo "::error::a Santoni storage patch was skipped by the build"
+          if grep -E 'Skipping patch .*014[2345]-(santoni|oxygen)' build.log; then
+            echo "::error::a Santoni storage or oxygen board patch was skipped by the build"
             exit 1
           fi
-          echo "no Santoni storage patch skipped"
+          echo "no Santoni storage or oxygen board patch skipped"
 
       - name: Package build tree for local compiles
         if: always()

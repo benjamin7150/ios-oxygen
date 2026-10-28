@@ -1,6 +1,6 @@
 /*
- * Minimal text console on the ABL splash framebuffer for santoni (MSM8937).
- * 720x1280 24-bit RGB (r8g8b8), stride 2160 bytes.
+ * Minimal text console on the ABL splash framebuffer.
+ * santoni: 720x1280 24-bit BGR (b8g8r8).  oxygen: 1080x1920 32-bit BGRA.
  * With the MMU off every access is Device memory: byte writes ensure strict alignment.
  */
 #include "console.h"
@@ -16,22 +16,25 @@ volatile uint8_t *con_fb = (volatile uint8_t *)FB_BASE;
 static uint32_t con_bg;
 static int row;
 
-static inline void put_pixel24(int x, int y, uint32_t c)
+static inline void put_pixel(int x, int y, uint32_t c)
 {
 	if (x < 0 || x >= FB_W || y < 0 || y >= FB_H)
 		return;
-	volatile uint8_t *p = con_fb + (y * FB_STRIDE) + (x * 3);
-	/* Santoni physical continuous splash framebuffer is BGR24 (b8g8r8) */
+	volatile uint8_t *p = con_fb + (y * FB_STRIDE) + (x * FB_BPP);
+	/* BGR byte order on both boards (ABL cont-splash). */
 	p[0] = (uint8_t)(c & 0xff);		/* blue */
 	p[1] = (uint8_t)((c >> 8) & 0xff);	/* green */
 	p[2] = (uint8_t)((c >> 16) & 0xff);	/* red */
+#if FB_BPP >= 4
+	p[3] = 0xff;				/* alpha (ignored by the panel scanout) */
+#endif
 }
 
 void con_clear(uint32_t bg)
 {
 	for (int y = 0; y < FB_H; y++) {
 		for (int x = 0; x < FB_W; x++)
-			put_pixel24(x, y, bg);
+			put_pixel(x, y, bg);
 	}
 	con_bg = bg;
 	row = 0;
@@ -50,7 +53,7 @@ static void put_char(int col, char ch, uint32_t fg)
 			uint32_t c = (g[gy] & (0x80 >> gx)) ? fg : con_bg;
 			for (int sy = 0; sy < SCALE; sy++) {
 				for (int sx = 0; sx < SCALE; sx++)
-					put_pixel24(x0 + gx * SCALE + sx, y0 + gy * SCALE + sy, c);
+					put_pixel(x0 + gx * SCALE + sx, y0 + gy * SCALE + sy, c);
 			}
 		}
 	}

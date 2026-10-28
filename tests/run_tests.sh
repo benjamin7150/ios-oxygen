@@ -21,6 +21,7 @@ mkdir -p "$OUT"
 P142="xnu/patches/0142-santoni-sdhci-emmc-driver.patch"
 P143="xnu/patches/0143-santoni-persistent-console-log.patch"
 P144="xnu/patches/0144-santoni-4k-unsigned-dyld-cache.patch"
+P145="xnu/patches/0145-oxygen-board-target.patch"
 
 echo "== host unit tests (-Wall -Wextra) =="
 for t in test_sdhci_mock test_gpt_parser test_log_ring; do
@@ -230,13 +231,28 @@ python3 tools/check_patch.py "$P142" -q \
 	--added-lacks 'bsd/dev/santoni_sdhci.c:return physio('
 echo "ok   0142 never hands a user VA to memcpy and keeps the cdev lock off uiomove"
 
-# Optional deep check: if a patched XNU source tree is provided, the three
-# patches must also apply to it as-is (git apply --check).
+echo "== OXY-01: oxygen is a santoni sibling with a 1080x1920 32bpp panel (0145) =="
+python3 tools/check_patch.py "$P145" -q \
+	--added-contains 'pexpert/pexpert/arm64/OXYGEN.h:#define OXYGEN                        1' \
+	--added-contains 'pexpert/pexpert/arm64/OXYGEN.h:#define SANTONI                       1' \
+	--added-contains 'pexpert/pexpert/arm64/board_config.h:#ifdef ARM64_BOARD_CONFIG_OXYGEN' \
+	--added-contains 'makedefs/MakeInc.def:MACHINE_FLAGS_ARM64_OXYGEN = -DARM64_BOARD_CONFIG_OXYGEN -DARM64_BOARD_CONFIG_SWEET' \
+	--added-contains 'config/MASTER.arm64.oxygen:# oxygen (Xiaomi Mi Max 2, MSM8953)' \
+	--added-contains 'osfmk/arm64/start.s:Stage 0: white first 32 rows of the 1080x1920 32bpp panel' \
+	--added-contains 'osfmk/arm64/sweet_early.c:#define EARLY_WIDTH 1080u' \
+	--added-contains 'osfmk/arm64/sweet_early.c:#define EARLY_HEIGHT 1920u' \
+	--added-contains 'osfmk/arm64/sweet_early.c:#define EARLY_STRIDE (4320u / 4)' \
+	--added-contains 'osfmk/arm64/arm_vm_init.c:0x90000000ULL + (uint64_t)i * ARM_TT_L2_SIZE' \
+	--added-contains 'osfmk/console/serial_console.c:#if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)'
+echo "ok   0145 adds the OXYGEN target, 1080x1920 32bpp early console and five-block NC alias"
+
+# Optional deep check: if a patched XNU source tree is provided, the patches
+# must also apply to it as-is (git apply --check).
 if [ -n "${XNU_SRC:-}" ]; then
 	echo "== git apply --check against XNU_SRC=$XNU_SRC =="
 	(cd "$XNU_SRC" && git apply --check \
-	    "$OLDPWD/$P142" "$OLDPWD/$P143" "$OLDPWD/$P144")
-	echo "ok   all three patches apply to $XNU_SRC"
+	    "$OLDPWD/$P142" "$OLDPWD/$P143" "$OLDPWD/$P144" "$OLDPWD/$P145")
+	echo "ok   all four patches apply to $XNU_SRC"
 fi
 
 echo "run_tests: all hosts tests, patch checks and shipped-code assertions passed"

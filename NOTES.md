@@ -1,5 +1,65 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## oxygen (2026-10-28): first Mi Max 2 (MSM8953) board port, kernel target + shim
+
+- **Goal:** port the working santoni bring-up to the Xiaomi Mi Max 2
+  (`oxygen`, MSM8953), using an iPhone 8 Plus (`D21AP` / `iPhone10,2`) IPSW as
+  the userland donor because its 1080x1920 panel matches oxygen 1:1.
+- **Live hardware facts** (from oxygen's running Android FDT, saved as
+  `resources/oxygen.dtb`, sha256 `7f010cd5...73701c`; `resources/` is ignored):
+  SDCC1 `0x7824900`/`0x7824000`, QGIC2 `0xb000000`/`0xb002000`, APPS WDT
+  `0xb017000`, GCC `0x1800000`, boot core cluster1/core0 MPIDR `0x100`, 8x
+  Cortex-A53, GICv2, 19.2 MHz timebase, vtimer INTID 20, `userdata` =
+  `mmcblk0p66`. Carve-outs: `other_ext@0x84a00000`, `modem@0x86c00000`,
+  `adsp_fw@0x8d600000`, `wcnss@0x8e800000`, `splash@0x90001000` size
+  `0x13ff000` (ends exactly at `0x91400000`), `dfps@0x90000000` (disabled),
+  `ramoops@0xb0000000`. Android `fb0` reports 1080x1920, 32 bpp, stride 4320;
+  ABL continuous splash lives at `0x90001000`. (If real colours come out wrong,
+  the fallback is 24 bpp / stride 3240.)
+- **Kernel (0145-oxygen-board-target.patch, 16 files / 30 hunks):** new
+  `ARM64_BOARD_CONFIG_OXYGEN` MACHINE_CONFIG (`config/MASTER.arm64.oxygen`,
+  `pexpert/.../OXYGEN.h`). It defines both `ARM64_BOARD_CONFIG_OXYGEN` and
+  `ARM64_BOARD_CONFIG_SWEET`; `OXYGEN.h` additionally defines the inner
+  `OXYGEN`, `SANTONI` and `SWEET` macros so every santoni bring-up branch
+  (SDHCI, serial console, UBC/dyld-cache 4K fix, vm_shared_region, topaz
+  cpufreq/battery exclusion, FIQ/GICv2) is shared. Oxygen-specific: early
+  console 1080x1920 BGRA32 at scale 2, `start.s` maps five 2 MiB Normal-NC
+  blocks (`0x90000000..0x90a00000`) and `arm_vm_init` keeps a five-block final
+  alias; RAM is `0x91400000..0xafe00000` (492 MiB, below ramoops).
+- **Shim:** `shim/board.h` selects santoni or oxygen (`-DBOARD_OXYGEN`);
+  the console has a generic BGR/BGRA pixel writer; the loader reports
+  `FB_BPP*8` depth / board stride; MMU maps the exact 2 MiB span (four blocks
+  on oxygen); `build.sh [payload] --board oxygen` passes `--native` to
+  `mkadt.py`; host/loader tests are board-aware.
+- **Synthetic ADT:** `tools/mkadt.py` now has per-board profiles and identity.
+  Oxygen: `dram-base 0x91400000`, `dram-size 0x1ec00000`, fbcon 1080x1920
+  depth 32 stride 4320, native canvas 1080x1920, `display-scale 3`, root
+  compatible `D21AP|iPhone10,2|xiaomi,oxygen|xiaomi,sweet|qcom,msm8953|AppleARM`,
+  chip-id `0x8015`, and **no** `home-button-type` (Home-button device).
+  Santoni output is unchanged (canvas 1125x2436 default, scale 2).
+- **Tests/CI:** `tests/run_tests.sh` gained `OXY-01`; full suite passes locally
+  with `CC=gcc HOST_CC=gcc`. The workflow skip guard now also fails if
+  `014[2345]-(santoni|oxygen)` is skipped. Oxygen kernel build has **not** run
+  yet.
+- **Open items:**
+  1. Run the OXYGEN CI build and fix compile errors.
+  2. `resources/oxygen_appended_dtbs.bin` does not exist. `shim/build.sh` falls
+     back to appending the raw live FDT (`../oxygen.dtb`), but Qualcomm ABL
+     normally scans for a `dt_table` (`0xd7b7d00a`), not a bare FDT. Pull the
+     stock oxygen boot image read-only with adb and extract its dtb table with
+     `tools/unpack_bootv2.py`; if the stock image only has a raw FDT, build a
+     minimal one-entry dt_table with the live oxygen DTB and its
+     `qcom,msm-id`/`qcom,board-id` values.
+  3. Extract the iPhone 8 Plus donor tree to
+     `research/ipsw-8plus/d21ap.adt` so `/product` is populated (mkadt currently
+     warns and omits it).
+  4. No hardware boot attempted yet; Android data and all partitions are
+     untouched (the persistent console log stays off unless `sweetlog=1`).
+- **Next concrete action:** push this commit, run
+  `gh workflow run xnu.yml -f machine_config=OXYGEN`, download the kernel
+  artifact, then `shim/build.sh <kernel> --board oxygen`; stage the resulting
+  `shim-boot.img` for a non-destructive `fastboot boot`.
+
 ## dff9f18 (2026-10-22): fix EL1 permission fault on `/dev/remmcroot0` reads
 
 - **Symptom:** PID 1 read of `/dev/remmcroot0` panicked in `_memmove` at

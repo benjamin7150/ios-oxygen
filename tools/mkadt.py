@@ -10,19 +10,35 @@ import hashlib, os, struct, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import adt  # noqa: E402
 
-# Kernel-managed RAM: strictly above Qualcomm XPU carve-outs (ending at 0x92280000)
-PHYS_BASE = 0x98000000
-MEM_SIZE = 0x28000000  # 640 MiB safe budget (fits within Gigabyte 2 L1 entry for 4K bootstrap pmap)
+# ---- per-board profile -----------------------------------------------------
+# Verified against each phone's live /proc/device-tree (see NOTES.md).
+# Everything not listed is identical across the family: SDCC1 at
+# 0x7824000/0x7824900, QGIC2 at 0xb000000, APPS watchdog at 0xb017000,
+# GCC at 0x1800000, boot cluster1 core0 (MPIDR 0x100).
+BOARDS = {
+    'santoni': dict(
+        # Redmi 4X (MSM8937). DRAM bank1 0x80000000+2 GiB; kernel RAM above the
+        # Qualcomm XPU carve-outs which end at 0x92280000.
+        phys_base=0x98000000, mem_size=0x28000000,  # 640 MiB safe budget
+        fb=0x90001000, fb_w=720, fb_h=1280, fb_bpp=3,  # BGR24
+        model='santoni', ecid=0x53414e544f4e4901, display_scale=2,
+    ),
+    'oxygen': dict(
+        # Mi Max 2 (MSM8953). Carve-outs run to the splash region ending at
+        # 0x91400000; the free gap 0x91400000..0xb0000000 (492 MiB) holds XNU.
+        phys_base=0x91400000, mem_size=0x1ec00000,  # 492 MiB
+        fb=0x90001000, fb_w=1080, fb_h=1920, fb_bpp=4,  # BGRA32
+        model='oxygen', ecid=0x4f585947454e0201, display_scale=3,
+    ),
+}
+BOARD = 'santoni'
+
 # /arm-io children are relative to this; it must not be 0 (serial_init bails)
 SOC_BASE = 0x01000000
 
-# interrupt-controller@b000000 (santoni MSM8937 QGIC2)
+# interrupt-controller@b000000 (QGIC2, identical on MSM8937/MSM8953)
 GICD, GICD_SIZE = 0x0b000000, 0x1000
 GICC, GICC_SIZE = 0x0b002000, 0x1000
-# Continuous splash simplefb left lit by Qualcomm ABL (720x1280 24-bit BGR)
-FB, FB_SIZE = 0x90001000, 720 * 1280 * 3
-SWEET_ECID = 0x53414e544f4e4901  # 'SANTONI' + 1, synthetic
-FB_W, FB_H, FB_STRIDE = 720, 1280, 720 * 3
 TIMEBASE = 19200000
 VTIMER_INTID = 20
 # QEMU virt (-M virt,gic-version=2 -cpu cortex-a53): GICD/GICC and the generic timer's CNTFRQ
@@ -31,18 +47,37 @@ QEMU_VTIMER_INTID = 27
 
 BOOT_MANIFEST_HASH = hashlib.sha384(b'santoni boot manifest').digest()
 
-# The iOS userland is the iPhone X (iPhone10,3 / D22AP) IPSW. MobileGestalt
-# derives product type, device class, home-button-less UI, artwork etc. from
-# the root identity and /product of the real D22AP device tree. That tree is
-# an Apple artifact (kept out of git): extract it from the IPSW with
-#   tools/remotezip.py URL DeviceTree.d22ap.im4p DIR
-#   ipsw img4 im4p extract DIR/Firmware/all_flash/DeviceTree.d22ap.im4p -o d22ap.adt
-D22AP_ADT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../research/ipsw-x/d22ap.adt')
+# ---- iOS userland identity --------------------------------------------------
+# The iOS userland comes from a donor iPhone IPSW. MobileGestalt derives product
+# type, device class, Home-button UI, artwork etc. from the root identity and
+# /product of the real donor device tree. Those trees are Apple artifacts (kept
+# out of git): extract with
+#   tools/remotezip.py URL DeviceTree.<dt>.im4p DIR
+#   ipsw img4 im4p extract DIR/Firmware/all_flash/DeviceTree.<dt>.im4p -o <dt>.adt
+#
+# Per-board donor:
+#   santoni -> iPhone X   (iPhone10,3 / D22AP, A11 = chip-id 0x8015, no Home button)
+#   oxygen  -> iPhone 8+  (iPhone10,2 / D21AP, A11 = chip-id 0x8015, Home button,
+#                          1080x1920 panel == the phone's panel, so sweetfb_native
+#                          maps 1:1)
+IDENTITY = {
+    'santoni': dict(dt='D22AP', model='iPhone10,3', product='iPhone10,3',
+                    target_type='D22', target_sub='D22AP', chip_id=0x8015,
+                    home_button_type=2, adt='../research/ipsw-x/d22ap.adt'),
+    'oxygen': dict(dt='D21AP', model='iPhone10,2', product='iPhone10,2',
+                   target_type='D21', target_sub='D21AP', chip_id=0x8015,
+                   home_button_type=None, adt='../research/ipsw-8plus/d21ap.adt'),
+}
 
 
-def d22ap_product(path=D22AP_ADT):
-    """/product properties of the real D22AP tree, without the syscfg
+def donor_adt_path(board):
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), IDENTITY[board]['adt'])
+
+
+def d22ap_product(board):
+    """/product properties of the real donor tree, without the syscfg
     placeholders iBoot would fill in (flag bit set) and the node bookkeeping."""
+    path = donor_adt_path(board)
     if not os.path.exists(path):
         print(f'warning: {path} missing, no /product node', file=sys.stderr)
         return None
@@ -64,9 +99,15 @@ def node(name, props=(), children=()):
     return n
 
 
-def build(seed=None, qemu=False, native=False):
+def build(seed=None, qemu=False, native=False, board=BOARD):
     """qemu=True: same tree, but with QEMU virt's GIC addresses and CNTFRQ (tools/qemu-sweet.py)."""
-    phys_base, mem_size = PHYS_BASE, MEM_SIZE
+    prof = BOARDS[board]
+    ident = IDENTITY[board]
+    phys_base, mem_size = prof['phys_base'], prof['mem_size']
+    FB, FB_W, FB_H, FB_BPP = prof['fb'], prof['fb_w'], prof['fb_h'], prof['fb_bpp']
+    FB_SIZE = FB_W * FB_H * FB_BPP
+    FB_STRIDE = FB_W * FB_BPP
+    SWEET_ECID = prof['ecid']
     gicd, gicc, timebase = (QEMU_GICD, QEMU_GICC, QEMU_TIMEBASE) if qemu else (GICD, GICC, TIMEBASE)
     seed = seed if seed is not None else os.urandom(64)
     phandle = iter(range(1, 1000))
@@ -78,8 +119,8 @@ def build(seed=None, qemu=False, native=False):
         ('dram-size', u64(mem_size)),
         ('random-seed', seed),
         ('debug-enabled', u32(1)),
-        ('firmware-version', cstr('santoni-shim')),
-        ('system-firmware-version', cstr('santoni-shim')),
+        ('firmware-version', cstr(board + '-shim')),
+        ('system-firmware-version', cstr(board + '-shim')),
         # iBoot's SHA-384 of the boot manifest; /sbin/mount -P 1 exits unless
         # it exists (bind mounts /private/preboot/<hex>/usr/standalone/firmware,
         # tolerating a missing directory). Fixed stand-in value.
@@ -88,16 +129,16 @@ def build(seed=None, qemu=False, native=False):
         # it; real A11+ device trees say sha2-384.
         ('crypto-hash-method', cstr('sha2-384')),
         # MobileGestalt's screen class: display-scale (u32, default 0) comes
-        # from /chosen, the pixel size from IOMobileFramebuffer.
-        # Santoni 720x1280 @2x = 360x640 points.
-        ('display-scale', u32(2)),
+        # from /chosen, the pixel size from IOMobileFramebuffer. Santoni's
+        # 720x1280 panel is @2x; oxygen's 1080x1920 is @3x (360x640 points).
+        ('display-scale', u32(prof['display_scale'])),
         # XNU derives IOPlatformUUID (gethostuuid) from these on arm; without
         # them CFPreferences cannot use kCFPreferencesCurrentHost (no ByHost
         # files), so e.g. DataMigration never records LastSystemVersion and
         # migrates on every boot. Synthetic ECID (not the phone's); chip-id
         # of the A11 that the iPhone X userland expects.
         ('unique-chip-id', struct.pack('<Q', SWEET_ECID)),
-        ('chip-id', u32(0x8015)),
+        ('chip-id', u32(ident['chip_id'])),
         # Security status as on a dev-fused, undemoted board (tuple 0,0,1,1):
         # MobileGestalt reads these from /chosen, and mobileactivationd's
         # DeviceType then takes its native "Hactivation" branch (state
@@ -186,8 +227,8 @@ def build(seed=None, qemu=False, native=False):
             ph(),
             ('device_type', cstr('display-subsystem')),
             ('compatible', cstr('sweet,display')),
-            ('canvas-width', u32(720 if native else 1125)),
-            ('canvas-height', u32(1280 if native else 2436)),
+            ('canvas-width', u32(FB_W if native else 1125)),
+            ('canvas-height', u32(FB_H if native else 2436)),
         ])])
 
     fbcon = node('sweet-fbcon', [
@@ -196,7 +237,7 @@ def build(seed=None, qemu=False, native=False):
         ('width', u32(FB_W)),
         ('height', u32(FB_H)),
         ('stride', u32(FB_STRIDE)),
-        ('depth', u32(24)),
+        ('depth', u32(FB_BPP * 8)),
     ])
 
     # Internal eMMC 5.1 controller (SDCC1) for bsd/dev/santoni_sdhci.c. At the
@@ -222,15 +263,16 @@ def build(seed=None, qemu=False, native=False):
     defaults = node('defaults', [ph(), ('no-effaceable-storage', u32(1))])
 
     # MobileGestalt HomeButtonType = IODeviceTree:/buttons home-button-type
-    # (D22AP: 2, no Home button; absent = 0 = Home-button device).
-    buttons = node('buttons', [
-        ph(),
-        ('button-names', cstr('volup') + cstr('voldown') + cstr('hold')),
-        ('home-button-type', u32(2)),
-        ('opposed-power-vol-buttons', u32(1)),
-    ])
+    # (iPhone X: 2, no Home button; absent = 0 = Home-button device such as the
+    # iPhone 8 Plus that oxygen impersonates).
+    button_props = [ph(),
+                    ('button-names', cstr('volup') + cstr('voldown') + cstr('hold')),
+                    ('opposed-power-vol-buttons', u32(1))]
+    if ident['home_button_type'] is not None:
+        button_props.append(('home-button-type', u32(ident['home_button_type'])))
+    buttons = node('buttons', button_props)
 
-    product_props = d22ap_product()
+    product_props = d22ap_product(board)
     # Our framebuffer is sRGB 8-bit. With the iPhone X's 'P3' MobileGestalt says
     # HasExtendedColorDisplay and WebKit renders page tiles into 10-bit surfaces
     # ('w30r', 'b3a8') that this kernel does not provide: Safari pages stay blank.
@@ -238,15 +280,16 @@ def build(seed=None, qemu=False, native=False):
         product_props = [(k, cstr('sRGB') if k == 'artwork-display-gamut' else v) for k, v in product_props]
     product = [node('product', [ph()] + product_props)] if product_props else []
 
-    # Identity of the iPhone X whose userland runs here: compatible[0] is
-    # hw.model/hw.target (D22AP), model is hw.machine/hw.product
-    # (iPhone10,3). 'xiaomi,santoni' and qcom,msm8937 match our target silicon.
+    # Identity of the donor iPhone whose userland runs here: compatible[0] is
+    # hw.model/hw.target, model is hw.machine/hw.product. 'xiaomi,<board>' and
+    # the qcom SoC match the target silicon.
+    soc = {'santoni': 'qcom,msm8937', 'oxygen': 'qcom,msm8953'}[board]
     return node('device-tree', [
         ph(),
-        ('compatible', cstr('D22AP') + cstr('iPhone10,3') + cstr('xiaomi,santoni') + cstr('xiaomi,sweet') + cstr('qcom,msm8937') + cstr('AppleARM')),
-        ('model', cstr('iPhone10,3')),
-        ('target-type', cstr('D22')),
-        ('target-sub-type', cstr('D22AP')),
+        ('compatible', cstr(ident['dt']) + cstr(ident['product']) + cstr('xiaomi,' + board) + cstr('xiaomi,sweet') + cstr(soc) + cstr('AppleARM')),
+        ('model', cstr(ident['model'])),
+        ('target-type', cstr(ident['target_type'])),
+        ('target-sub-type', cstr(ident['target_sub'])),
         ('manufacturer', cstr('Apple Inc.')),
         ('#address-cells', u32(2)),
         ('#size-cells', u32(2)),
@@ -255,13 +298,19 @@ def build(seed=None, qemu=False, native=False):
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        print("Usage: mkadt.py OUT.adt [--dump] [--qemu] [--native]", file=sys.stderr)
+        print("Usage: mkadt.py OUT.adt [--dump] [--qemu] [--native] [--board NAME]", file=sys.stderr)
         sys.exit(1)
-    root = build(qemu='--qemu' in sys.argv, native='--native' in sys.argv)
+    board = 'santoni'
+    if '--board' in sys.argv:
+        i = sys.argv.index('--board')
+        board = sys.argv[i + 1]
+        if board not in BOARDS:
+            raise SystemExit(f'unknown --board {board}; choices: {sorted(BOARDS)}')
+    root = build(qemu='--qemu' in sys.argv, native='--native' in sys.argv, board=board)
     blob = adt.serialize(root)
     out_path = sys.argv[1]
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     open(out_path, 'wb').write(blob)
     if '--dump' in sys.argv:
         adt.dump(adt.parse(blob)[0])
-    print(f'{out_path}: {len(blob)} bytes', file=sys.stderr)
+    print(f'{out_path}: {len(blob)} bytes (board={board})', file=sys.stderr)

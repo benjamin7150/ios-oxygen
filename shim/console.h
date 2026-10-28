@@ -1,10 +1,6 @@
 #pragma once
 #include <stdint.h>
-
-#define FB_BASE		0x90001000UL	/* santoni continuous splash region */
-#define FB_W		720
-#define FB_H		1280
-#define FB_STRIDE	2160		/* 720 * 3 bytes, r8g8b8 matching mainline simplefb */
+#include "board.h"
 
 #define RED		0x00ff0000U
 #define BLUE		0x000000a0U

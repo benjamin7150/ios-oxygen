@@ -8,7 +8,7 @@ int main(void)
 {
 	con_fb = host_fb;
 	con_clear(RED);
-	con_str("SHIM", "santoni bare-metal shim");
+	con_str("SHIM", "bare-metal shim bring-up");
 	con_hex("MMFR0", 0x0000000000101122ULL);
 	con_hex2("PSCI", "ver=", 0x10001, "smccc=", 0x10002);
 	con_clear(BLUE);
@@ -18,8 +18,12 @@ int main(void)
 	if (!f)
 		return 1;
 	fprintf(f, "P6 %d %d 255\n", FB_W, FB_H);
+	/* Emit RGB24 regardless of FB_BPP: drop the alpha byte on 32bpp boards. */
 	for (int y = 0; y < FB_H; y++) {
-		fwrite(host_fb + y * FB_STRIDE, 1, FB_W * 3, f);
+		const uint8_t *row = host_fb + y * FB_STRIDE;
+		for (int x = 0; x < FB_W; x++) {
+			fwrite(row + x * FB_BPP, 1, 3, f);
+		}
 	}
 	fclose(f);
 	return 0;

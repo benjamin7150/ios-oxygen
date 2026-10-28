@@ -1,9 +1,26 @@
 #!/bin/bash
-# Build the freestanding shim and wrap it in an Android boot.img v0 for MSM8937 (santoni).
+# Build the freestanding shim and wrap it in an Android boot.img v0.
+#
+# Usage:  build.sh [payload] [--board santoni|oxygen]
+#   santoni (default): Redmi 4X, MSM8937.
+#   oxygen:            Mi Max 2, MSM8953 (1080x1920 32bpp FB, 4 GiB, iPhone 8+ identity).
 set -euo pipefail
 
-PAYLOAD="${1:-}"
+BOARD="santoni"
+PAYLOAD=""
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--board) BOARD="$2"; shift 2 ;;
+		*) PAYLOAD="$1"; shift ;;
+	esac
+done
 [ -n "$PAYLOAD" ] && [ -f "$PAYLOAD" ] && PAYLOAD="$(realpath "$PAYLOAD")"
+
+case "$BOARD" in
+	santoni|oxygen) ;;
+	*) echo "unknown --board $BOARD" >&2; exit 1 ;;
+esac
+BOARD_DEF="-DBOARD_$(printf '%s' "$BOARD" | tr 'a-z' 'A-Z')"
 
 cd "$(dirname "$0")"
 
@@ -14,7 +31,7 @@ NM="${NM:-llvm-nm}"
 LD="${LD:-ld.lld}"
 HOST_CC="${HOST_CC:-clang}"
 
-CFLAGS="-target aarch64-linux-gnu -O2 -ffreestanding -nostdlib -fno-pic -fno-jump-tables -mgeneral-regs-only -mstrict-align -fno-stack-protector -Wall -Wextra"
+CFLAGS="-target aarch64-linux-gnu -O2 -ffreestanding -nostdlib -fno-pic -fno-jump-tables -mgeneral-regs-only -mstrict-align -fno-stack-protector -Wall -Wextra $BOARD_DEF"
 
 mkdir -p out
 
@@ -41,16 +58,24 @@ echo "Building static Mach-O PID 1 init (santoni-init.S)..."
 $CC -target arm64-apple-ios16.0 -c ../tools/santoni-init.S -o out/santoni-init.o
 python3 ../tools/mkinit.py out/santoni-init.o out/init.macho
 
+# Board-tagged kernel command line (the tag identifies the image in logs; the
+# kernel target itself is selected at compile time by MACHINE_CONFIG).
+CMDLINE="debug=0x14e serial=3 disable_kprintf_output=0 -enable_kprintf_spam sweetfb_native=1 sweetcpufreq=0 sweetbattery=0 rd=md0 -v keepsyms=1 $BOARD"
+# The iPhone 8 Plus donor has the same 1080x1920 panel as oxygen: present the
+# native resolution as the UI canvas (1:1 mapping) instead of the iPhone X
+# 1125x2436 canvas that santoni uses.
+ADT_NATIVE=""
+[ "$BOARD" = oxygen ] && ADT_NATIVE="--native"
+
 # Ramdisk: an xnu payload (tools/mkpayload.py) if given as $1, else an empty
 # newc cpio -> diagnostics.
 RAMDISK="out/ramdisk.bin"
 if [ -n "$PAYLOAD" ]; then
 	magic=$(python3 -c "import sys; f=open(sys.argv[1],'rb'); b=f.read(4); print(b.hex())" "$PAYLOAD" 2>/dev/null || true)
 	if [ "$magic" = "cffaedfe" ] || [ "$magic" = "feedfacf" ]; then
-		echo "Detected raw Mach-O kernel ($PAYLOAD). Generating ADT and packing with mkpayload.py..."
-		python3 ../tools/mkadt.py out/santoni.adt
-		CMDLINE="debug=0x14e serial=3 disable_kprintf_output=0 -enable_kprintf_spam sweetfb_native=1 sweetcpufreq=0 sweetbattery=0 rd=md0 -v keepsyms=1 santoni"
-		python3 ../tools/mkpayload.py "$PAYLOAD" out/santoni.adt out/payload.bin --cmdline "$CMDLINE" --ramdisk out/init.macho
+		echo "Detected raw Mach-O kernel ($PAYLOAD). Generating $BOARD ADT and packing with mkpayload.py..."
+		python3 ../tools/mkadt.py "out/$BOARD.adt" --board "$BOARD" $ADT_NATIVE
+		python3 ../tools/mkpayload.py "$PAYLOAD" "out/$BOARD.adt" out/payload.bin --cmdline "$CMDLINE" --ramdisk out/init.macho
 		RAMDISK="out/payload.bin"
 	else
 		RAMDISK="$PAYLOAD"
@@ -63,14 +88,18 @@ else
 	fi
 fi
 
-# Append Santoni Qualcomm device tree table (29 DTBs including msm8940-xiaomi-santoni)
-# so Qualcomm LK finds the DTB at kernel_addr + image_size
-if [ -f ../resources/santoni_appended_dtbs.bin ]; then
-	cat ../resources/santoni_appended_dtbs.bin >> out/Image
+# Append the board's Qualcomm device tree table so Qualcomm LK finds a matching
+# DTB at kernel_addr + image_size.  santoni used a 29-DTB table; oxygen uses its
+# own FDT pulled from the live device.
+DTB_BLOB="../resources/${BOARD}_appended_dtbs.bin"
+if [ ! -f "$DTB_BLOB" ] && [ "$BOARD" = oxygen ] && [ -f ../oxygen.dtb ]; then
+	DTB_BLOB="../oxygen.dtb"
+fi
+if [ -f "$DTB_BLOB" ]; then
+	cat "$DTB_BLOB" >> out/Image
 fi
 
 # Packaging: wrap in boot.img v0 using tools/mkbootimg.py
-CMDLINE="debug=0x14e serial=3 disable_kprintf_output=0 -enable_kprintf_spam sweetfb_native=1 sweetcpufreq=0 sweetbattery=0 rd=md0 -v keepsyms=1 santoni"
 python3 ../tools/mkbootimg.py \
 	--kernel out/Image \
 	--ramdisk "$RAMDISK" \
@@ -81,13 +110,13 @@ python3 ../tools/mkbootimg.py \
 	--cmdline "$CMDLINE"
 
 # Host render of the console layout
-$HOST_CC -O2 -Wall -I. -o out/host_test console.c host_test.c && ./out/host_test
+$HOST_CC -O2 -Wall -I. $BOARD_DEF -o out/host_test console.c host_test.c && ./out/host_test
 
 # Host unit test for GICv2 MMIO lifecycle
-$HOST_CC -O2 -Wall -I. -o out/gic_test gic_test.c && ./out/gic_test
+$HOST_CC -O2 -Wall -I. $BOARD_DEF -o out/gic_test gic_test.c && ./out/gic_test
 
 # Host unit test for Mach-O segment unroller and boot_args
-$HOST_CC -O2 -Wall -I. -o out/loader_test loader_test.c loader.c && ./out/loader_test
+$HOST_CC -O2 -Wall -I. $BOARD_DEF -o out/loader_test loader_test.c loader.c && ./out/loader_test
 
 # Phase 4 storage: SDHCI register mock, hardened GPT (CRC32 + SYSTEM log
 # fence) and console log ring, plus unified-diff structure of xnu/patches.

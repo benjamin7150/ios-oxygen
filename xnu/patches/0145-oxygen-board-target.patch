@@ -1,0 +1,600 @@
+diff --git a/bsd/dev/santoni_sdhci.c b/bsd/dev/santoni_sdhci.c
+index 704b37d..fe248b7 100644
+--- a/bsd/dev/santoni_sdhci.c
++++ b/bsd/dev/santoni_sdhci.c
+@@ -34,7 +34,7 @@
+  * santoni_sdhci_write_log_blocks() is the one write path that needs neither
+  * emmcrw=1 nor the userdata fence, and it refuses anything outside that area.
+  */
+-#if defined(ARM64_BOARD_CONFIG_SANTONI)
++#if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)
+ 
+ #include <sys/param.h>
+ #include <sys/systm.h>
+diff --git a/bsd/dev/sweet_cpufreq.c b/bsd/dev/sweet_cpufreq.c
+index 969c04c..70b435a 100644
+--- a/bsd/dev/sweet_cpufreq.c
++++ b/bsd/dev/sweet_cpufreq.c
+@@ -4,10 +4,11 @@
+  * layout): LUT at +0x110, 32-byte rows, PERF_STATE at +0x920.
+  * Nothing scales it down again: there is no XNU cpufreq driver yet.
+  *
+- * santoni (MSM8937): there is no cpufreq-hw block at all. 0xf523000 is
+- * unassigned in the MSM8937 map (the highest peripheral is 0xc200000), so
+- * mapping and writing it faults the board: the whole MMIO part is compiled
+- * out for SANTONI.
++ * santoni (MSM8937) and oxygen (MSM8953): neither has the SM6225 cpufreq-hw
++ * block at 0xf523000. MSM8937 has no cpufreq-hw at all (the highest
++ * peripheral is 0xc200000); MSM8953 exposes a different qcom,cpu-clock-8953
++ * block at 0xb116000. Mapping or writing 0xf523000 faults, so the whole MMIO
++ * part is compiled out for SANTONI and OXYGEN.
+  */
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+ #include <sys/param.h>
+@@ -26,10 +27,11 @@ int sweet_cpufreq_max(void);
+ int
+ sweet_cpufreq_max(void)
+ {
+-#if defined(ARM64_BOARD_CONFIG_SANTONI)
++#if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)
+ 	/*
+-	 * MSM8937: there is no cpufreq-hw block, so 0xf523000 is never
+-	 * mapped or written. sweetcpufreq has no meaning on this board.
++	 * MSM8937/MSM8953: there is no SM6225 cpufreq-hw block here, so
++	 * 0xf523000 is never mapped or written. sweetcpufreq has no meaning
++	 * on these boards.
+ 	 */
+ 	printf("SWEET CPUFREQ: no cpufreq-hw on this board; skipped\n");
+ 	return -1;
+diff --git a/bsd/dev/sweet_i2c1.c b/bsd/dev/sweet_i2c1.c
+index f5830b8..af54778 100644
+--- a/bsd/dev/sweet_i2c1.c
++++ b/bsd/dev/sweet_i2c1.c
+@@ -49,13 +49,13 @@ int sweet_i2c1_read(uint8_t addr, uint8_t reg, uint8_t *buf, unsigned len);
+ #define SE_PACK1        0x000ffefeu
+ 
+ /*
+- * santoni (MSM8937): the topaz battery bus does not exist here. 0x4a84000
+- * is unassigned on MSM8937 (its QUP is at 0xa20000, its TLMM at 0x1000000,
+- * its GCC at 0x1800000), so mapping or writing it faults the board. The
+- * whole topaz engine is compiled out; the battery stays on the static
+- * fallback until a real MSM8937 gauge driver exists.
++ * santoni (MSM8937) and oxygen (MSM8953): the topaz battery bus does not
++ * exist here. 0x4a84000 is unassigned on both (MSM8937 QUP at 0xa20000;
++ * MSM8953 BLSP I2C at 0x78b5000/0x78b6000/0x78b7000/0x7af5000), so mapping
++ * or writing it faults the board. The whole topaz engine is compiled out;
++ * the battery stays on the static fallback until a real gauge driver exists.
+  */
+-#if defined(ARM64_BOARD_CONFIG_SANTONI)
++#if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)
+ int
+ sweet_i2c1_init(void)
+ {
+diff --git a/bsd/kern/ubc_subr.c b/bsd/kern/ubc_subr.c
+index 22f56bb..3850739 100644
+--- a/bsd/kern/ubc_subr.c
++++ b/bsd/kern/ubc_subr.c
+@@ -371,7 +371,7 @@ cs_validate_codedirectory(const CS_CodeDirectory *cd, size_t length)
+ 	if (ntohl(cd->magic) != CSMAGIC_CODEDIRECTORY) {
+ 		return EBADEXEC;
+ 	}
+-#if defined(ARM64_BOARD_CONFIG_SANTONI)
++#if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)
+ 	/*
+ 	 * iOS 16's dyld shared cache is signed with 16 KiB hash units
+ 	 * (pageSize == 14) while Santoni runs a 4 KiB translation granule, so
+@@ -4646,7 +4646,7 @@ ubc_cs_blob_add(
+ 		return error;
+ 	}
+ 
+-#if defined(ARM64_BOARD_CONFIG_SANTONI)
++#if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)
+ 	/*
+ 	 * pageSize 14 means 16 KiB hash units on 4 KiB pages: cs_validate_hash()
+ 	 * would hash a whole 16 KiB unit out of a single mapped 4 KiB page and
+diff --git a/config/MASTER.arm64.oxygen b/config/MASTER.arm64.oxygen
+new file mode 100644
+index 0000000..5a1dc73
+--- /dev/null
++++ b/config/MASTER.arm64.oxygen
+@@ -0,0 +1,115 @@
++#
++# oxygen (Xiaomi Mi Max 2, MSM8953): MASTER.arm64.sweet adapted for Cortex-A53
++# 4 KiB translation granule, open-source arm64 assembly and pmap (nos_arm_asm,
++# nos_arm_pmap). Same machine-independent options as santoni; the OXYGEN board
++# header selects the 1080x1920 32bpp panel paths.
++#
++#
++# Mach Operating System
++# Copyright (c) 1986 Carnegie-Mellon University
++# Copyright 2001-2018 Apple Inc.
++#
++# All rights reserved.  The CMU software License Agreement
++# specifies the terms and conditions for use and redistribution.
++#
++######################################################################
++#
++#  Master Apple configuration file (see the master machine independent
++#  configuration file for a description of the file format).
++#
++######################################################################
++#
++#  Standard Apple OS Configurations:
++#  -------- ----- -- ---------------
++#
++#  KERNEL_BASE =    [ arm64 config_pmap_ppl medium msgb_large config_requires_u32_munging config_delay_idle_sleep config_proc_udata_storage config_uexc config_darkboot nos_arm_asm nos_arm_pmap ]
++#  KERNEL_RELEASE = [ KERNEL_BASE ]
++#  KERNEL_DEV =     [ KERNEL_BASE development mach_assert config_xnupost proc_ref_debug config_proc_resource_limits ]
++#  KERNEL_DEBUG =   [ KERNEL_BASE debug mach_assert config_xnupost config_waitq_stats config_workloop_debug config_proc_resource_limits ]
++#  BSD_BASE =       [ mach_bsd sysv_sem sysv_msg sysv_shm config_netboot config_imageboot psynch config_proc_uuid_policy config_coredump pgo config_personas ]
++#  BSD_RELEASE =    [ BSD_BASE ]
++#  BSD_DEV =        [ BSD_BASE config_vnguard ]
++#  BSD_DEBUG =      [ BSD_BASE config_vnguard ]
++#  FILESYS_BASE =   [ devfs fdesc fifo mockfs sweet_hfs fs_compression config_protect config_mnt_rootsnap config_rosv_startup config_mount_vm config_mount_prebootrecovery config_basesystemroot config_fse quota namedstreams config_imgsrc_access config_triggers config_ext_resolver config_searchfs config_volfs config_appledouble nullfs config_mnt_suid config_firmlinks config_dataless_files config_union_mounts config_file_leases ]
++#  FILESYS_RELEASE= [ FILESYS_BASE ]
++#  FILESYS_DEV =    [ FILESYS_BASE config_iocount_trace ]
++#  FILESYS_DEBUG =  [ FILESYS_BASE config_iocount_trace ]
++#  NFS =            [ nfsserver ]
++#  SKYWALK_BASE =   [ skywalk config_nexus_user_pipe config_nexus_kernel_pipe config_nexus_monitor config_nexus_flowswitch config_nexus_netif ]
++#  SKYWALK_RELEASE = [ SKYWALK_BASE ]
++#  SKYWALK_DEV =    [ SKYWALK_BASE ]
++#  SKYWALK_DEBUG =  [ SKYWALK_BASE ]
++#  NETWORKING =     [ inet bpfilter dummynet traffic_mgt sendfile ah_all_crypto bond vlan gif stf ifnet_input_chk config_mbuf_jumbo if_bridge MULTIPATH if_fake remote_vif ]
++#  NETWORKING_RELEASE = [ NETWORKING ]
++#  NETWORKING_DEV = [ NETWORKING_RELEASE packet_mangler if_headless ]
++#  NETWORKING_DEBUG = [ NETWORKING_DEV ]
++#  VPN =            [ ipsec flow_divert necp content_filter ]
++#  PF =             [ pf pflog ]
++#  MULTIPATH =      [ multipath mptcp ]
++#if SOC_CONFIG_t8020 || SOC_IS_VIRTUALIZED
++#  HIBERNATION =    [ ]
++#else /*!(SOC_CONFIG_t8020 || SOC_IS_VIRTUALIZED)*/
++#  HIBERNATION =    [ ]
++#endif /*SOC_CONFIG_t8020 || SOC_IS_VIRTUALIZED*/
++#  IOKIT_BASE =     [ iokit iokitcpp no_kernel_hid config_sleep iokitstats HIBERNATION ]
++#  IOKIT_RELEASE =  [ IOKIT_BASE ]
++#  IOKIT_DEV =      [ IOKIT_BASE iotracking ]
++#  IOKIT_DEBUG =    [ IOKIT_BASE iotracking ]
++#  LIBKERN_BASE =   [ libkerncpp config_blocks config_kec_fips crypto_sha2 config_img4 ]
++#  LIBKERN_RELEASE =[ LIBKERN_BASE zlib ]
++#  LIBKERN_DEV =    [ LIBKERN_BASE zlib iotracking ]
++#  LIBKERN_DEBUG =  [ LIBKERN_BASE zlib iotracking ]
++#  PERF_DBG_BASE =  [ config_dtrace mach_kdp config_serial_kdp kdp_interactive_debugging config_kdp_coredump_encryption config_pervasive_energy PERFMON_BASE kperf kpc ]
++#  PERF_DBG_RELEASE=[ PERF_DBG_BASE ist_kdebug ]
++#  PERF_DBG_DEV =   [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
++#  PERF_DBG_DEBUG = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
++#if SOC_IS_VIRTUALIZED
++#  PARAVIRT_BASE =  [ config_pv_ticket ]
++#else
++#  PARAVIRT_BASE =  [ ]
++#endif /*SOC_IS_VIRTUALIZED*/
++#  MACH_BASE =      [ mach config_ecc_logging vc_progress_white importance_inheritance config_atm config_coalitions config_iosched config_sysdiagnose config_telemetry config_mach_bridge_recv_time config_quiesce_counter config_arm_pfz config_user_notification phys_write_acct config_service_port_info config_voucher_deprecated PARAVIRT_BASE config_ledger_interval_max ]
++#  MACH_RELEASE =   [ MACH_BASE ]
++#  MACH_DEV =       [ MACH_BASE config_io_accounting importance_trace ]
++#  MACH_DEBUG =     [ MACH_BASE config_io_accounting importance_trace importance_debug ]
++#  SCHED_BASE =     [ config_sched_traditional config_sched_multiq config_sched_deferred_ast config_clutch config_sched_sfi config_sched_auto_join config_preadopt_tg ]
++#  SCHED_RELEASE =  [ SCHED_BASE ]
++#  SCHED_DEV =      [ SCHED_BASE ]
++#  SCHED_DEBUG =    [ SCHED_BASE config_sched_grrr config_sched_proto ]
++#  VM_BASE =        [ vm_pressure_events memorystatus config_code_decryption encrypted_swap config_deferred_reclaim ]
++#  VM_RELEASE =     [ VM_BASE ]
++#  VM_DEV =         [ VM_BASE dynamic_codesigning pgzalloc ]
++#  VM_DEBUG =       [ VM_BASE dynamic_codesigning pgzalloc ]
++#  VM_KASAN =       [ VM_BASE dynamic_codesigning config_kasan config_ubsan config_kcov config_ksancov kernel_tbi ]
++#  SECURITY =       [ config_macf config_audit kernel_integrity config_csr config_csr_from_dt config_setuid config_kas_info config_secure_bsd_root config_arcade config_supplemental_signatures second_static_trust_cache reslide_shared_cache ]
++#  BASE =           [ PF VPN SECURITY NFS ]
++#  RELEASE =        [ BASE KERNEL_RELEASE BSD_RELEASE FILESYS_RELEASE SKYWALK_RELEASE NETWORKING_RELEASE IOKIT_RELEASE LIBKERN_RELEASE    PERF_DBG_RELEASE MACH_RELEASE SCHED_RELEASE VM_RELEASE ]
++#  DEVELOPMENT =    [ BASE KERNEL_DEV     BSD_DEV     FILESYS_DEV     SKYWALK_DEV     NETWORKING_DEV     IOKIT_DEV     LIBKERN_DEV        PERF_DBG_DEV     MACH_DEV     SCHED_DEV     VM_DEV     ]
++#  DEBUG =          [ BASE KERNEL_DEBUG   BSD_DEBUG   FILESYS_DEBUG   SKYWALK_DEBUG   NETWORKING_DEBUG   IOKIT_DEBUG   LIBKERN_DEBUG      PERF_DBG_DEBUG   MACH_DEBUG   SCHED_DEBUG   VM_DEBUG   ]
++#  KASAN =          [ BASE KERNEL_DEV     BSD_DEV     FILESYS_DEV     SKYWALK_DEV     NETWORKING_DEV     IOKIT_DEV     LIBKERN_DEV        PERF_DBG_DEV     MACH_DEV     SCHED_DEV     VM_KASAN   ]
++#
++######################################################################
++#
++machine		"arm64"						# <arm64>
++
++makeoptions	OSFMK_MACHINE = "arm64"				# <mach>
++
++options		COUNT_SYSCALLS		# count bsd system calls 	# <countcalls>
++options     TRASH_VFP_ON_SAVE   # <debug,trash_vfp>
++options		ALTERNATE_DEBUGGER	# <alternate_debugger>
++options		MOCKFS		# Boot from an executable	# <mockfs>
++
++options   CONFIG_VNODES=1024		# <xsmall>
++
++options   CONFIG_FREEZE_SUSPENDED_MIN=4		# <xsmall>
++
++options	  CONFIG_MACH_APPROXIMATE_TIME
++
++options   CONFIG_KERNEL_INTEGRITY		# <kernel_integrity>
++
++options CONFIG_MACF_LAZY_VNODE_LABELS   # Turn on labels, don't preallocate
++
++options CONFIG_HYPERVISOR_PUBLIC   # unrestricted entitlement for hypervisor
++
++options   CONFIG_RESLIDE_SHARED_CACHE		# <reslide_shared_cache>
++options   CONFIG_KERNEL_TBI		# <kernel_tbi>
+diff --git a/iokit/Kernel/arm/SweetBattery.cpp b/iokit/Kernel/arm/SweetBattery.cpp
+index 3a1da62..c7f07c4 100644
+--- a/iokit/Kernel/arm/SweetBattery.cpp
++++ b/iokit/Kernel/arm/SweetBattery.cpp
+@@ -324,12 +324,12 @@ SweetBattery::start(IOService *provider)
+ 		return false;
+ 	}
+ 	/*
+-	 * santoni (MSM8937): this board has neither the SM6225 cpufreq-hw
+-	 * block (0xf523000) nor the topaz QUP0 SE1 battery bus (0x4a84000),
+-	 * so sweet_cpufreq_max() and sweet_i2c1_init() are inert here (see
+-	 * bsd/dev/sweet_cpufreq.c and bsd/dev/sweet_i2c1.c). The gauge then
+-	 * fails to initialise and the battery stays on the static fallback
+-	 * until a real MSM8937 fuel-gauge driver exists.
++	 * santoni (MSM8937) and oxygen (MSM8953): these boards have neither the
++	 * SM6225 cpufreq-hw block (0xf523000) nor the topaz QUP0 SE1 battery bus
++	 * (0x4a84000), so sweet_cpufreq_max() and sweet_i2c1_init() are inert here
++	 * (see bsd/dev/sweet_cpufreq.c and bsd/dev/sweet_i2c1.c). The gauge then
++	 * fails to initialise and the battery stays on the static fallback until
++	 * a real Qualcomm fuel-gauge driver exists.
+ 	 */
+ 	(void)sweet_cpufreq_max();
+ 	int real = 1;   /* topaz: real gauge by default; sweetbattery=0 for the static fallback */
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+index 878a0da..795aa3f 100644
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -784,7 +784,7 @@ IOFindBSDRoot( char * rootName, unsigned int rootNameSize,
+ 	}
+ #endif
+ 
+-#if defined(ARM64_BOARD_CONFIG_SANTONI)
++#if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)
+ //
+ //	SANTONI: root on a GPT partition of the internal eMMC 5.1
+ //	(bsd/dev/santoni_sdhci.c)
+diff --git a/makedefs/MakeInc.def b/makedefs/MakeInc.def
+index 4421451..fad18b7 100644
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -29,7 +29,7 @@ SUPPORTED_ARM64_MACHINE_CONFIGS = NONE
+ else ifneq ($(findstring _host,$(RC_ProjectName)),)
+ SUPPORTED_ARM64_MACHINE_CONFIGS = NONE
+ else
+-SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE SWEET SANTONI
++SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE SWEET SANTONI OXYGEN
+ 
+ endif
+ 
+@@ -66,6 +66,9 @@ MACHINE_FLAGS_ARM64_BCM2837 = -DARM64_BOARD_CONFIG_BCM2837
+ MACHINE_FLAGS_ARM64_SWEET = -DARM64_BOARD_CONFIG_SWEET                -mcpu=cortex-a53
+ # santoni: Cortex-A53 is ARMv8.0 (no LSE atomics). Enforce -mcpu=cortex-a53 and -march=armv8-a+crypto
+ MACHINE_FLAGS_ARM64_SANTONI = -DARM64_BOARD_CONFIG_SANTONI -DARM64_BOARD_CONFIG_SWEET -mcpu=cortex-a53 -march=armv8-a+crypto
++# oxygen: same Cortex-A53/MSM89x7 family as santoni; keep the SWEET config so
++# the shared topaz-family drivers compile and select the board via OXYGEN.
++MACHINE_FLAGS_ARM64_OXYGEN = -DARM64_BOARD_CONFIG_OXYGEN -DARM64_BOARD_CONFIG_SWEET -mcpu=cortex-a53 -march=armv8-a+crypto
+ 
+ 
+ #
+@@ -264,8 +267,8 @@ ifeq ($(ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG),)
+ # Without embdedded device map, use a default arch string
+ export ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := $(shell echo $(CURRENT_ARCH_CONFIG) | tr A-Z a-z)
+ ifneq ($(filter arm64,$(ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG)),)
+-# sweet and santoni have no pointer authentication: stay plain arm64
+-ifeq ($(filter SWEET SANTONI,$(CURRENT_MACHINE_CONFIG)),)
++# sweet, santoni and oxygen have no pointer authentication: stay plain arm64
++ifeq ($(filter SWEET SANTONI OXYGEN,$(CURRENT_MACHINE_CONFIG)),)
+ export ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := arm64e
+ endif
+ endif
+@@ -341,10 +344,10 @@ ARM64_PLKSEG_ADDR  =0xfffffe0004004000
+ ARM64_LINK_ADDR    =0xfffffe0007004000
+ endif
+ 
+-# Qualcomm MSM8937 (santoni) uses 4 KiB pages: TTBR1 has a 39-bit range.
+-# The macOS ARM_LARGE_MEMORY link address at -2 TiB is outside that range.
+-# Keep santoni inside the compact 39-bit kernel VA layout.
+-ifeq ($(CURRENT_MACHINE_CONFIG),SANTONI)
++# Qualcomm MSM8937/MSM8953 (santoni/oxygen) use 4 KiB pages: TTBR1 has a
++# 39-bit range. The macOS ARM_LARGE_MEMORY link address at -2 TiB is outside
++# that range. Keep these boards inside the compact 39-bit kernel VA layout.
++ifneq ($(filter SANTONI OXYGEN,$(CURRENT_MACHINE_CONFIG)),)
+ LARGE_MEMORY_DEFINE=-UARM_LARGE_MEMORY
+ ARM64_PLKSEG_ADDR  =0xfffffff004004000
+ ARM64_LINK_ADDR    =0xfffffff007004000
+diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
+index 65ff160..5bccbf1 100644
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -1841,7 +1841,9 @@ static void
+ sweet_early_map_final(void)
+ {
+ 	const vm_map_address_t va = SWEET_EARLY_FB_VA;
+-#if defined(SANTONI)
++#if defined(OXYGEN)
++	assert(va + 5 * ARM_TT_L2_SIZE <= gVirtBase);
++#elif defined(SANTONI)
+ 	assert(va + 2 * ARM_TT_L2_SIZE <= gVirtBase);
+ #else
+ 	assert(va + ARM_TT_L2_SIZE <= gVirtBase);
+@@ -1851,7 +1853,22 @@ sweet_early_map_final(void)
+ 	tt_entry_t *l2 = (tt_entry_t *)phystokv(l1 & ARM_TTE_TABLE_MASK);
+ 	tt_entry_t *slot = &l2[(va & ARM_TT_L2_INDEX_MASK) >> ARM_TT_L2_SHIFT];
+ 	assert(*slot == ARM_TTE_EMPTY);
+-#if defined(SANTONI)
++#if defined(OXYGEN)
++	/*
++	 * oxygen: 1080x1920x4 at 0x90001000 fits in four 2MB blocks; map five
++	 * (0x90000000 - 0x90a00000) so the early console keeps a guard block.
++	 */
++	for (unsigned int i = 1; i < 5; i++) {
++		assert(slot[i] == ARM_TTE_EMPTY);
++	}
++	for (unsigned int i = 0; i < 5; i++) {
++		slot[i] = (0x90000000ULL + (uint64_t)i * ARM_TT_L2_SIZE) |
++		    ARM_TTE_VALID | ARM_TTE_TYPE_BLOCK |
++		    ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) |
++		    ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_WRITECOMB) |
++		    ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX;
++	}
++#elif defined(SANTONI)
+ 	assert(*(slot + 1) == ARM_TTE_EMPTY);
+ 	slot[0] = 0x90000000ULL | ARM_TTE_VALID | ARM_TTE_TYPE_BLOCK |
+ 	    ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) |
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+index 079cda3..cda20c3 100644
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -513,7 +513,16 @@ LEXT(start_first_cpu)
+ 	mov		x20, x0
+ 	mov		x21, #0
+ 
+-#if defined(SANTONI)
++#if defined(OXYGEN)
++	/* Stage 0: white first 32 rows of the 1080x1920 32bpp panel (MMU off) */
++	MOV64	x0, 0x90001000
++	mov		w1, #-1
++	mov		x2, #(1080 * 32)
++1:	str		w1, [x0], #4
++	subs	x2, x2, #1
++	b.ne	1b
++	dsb		sy
++#elif defined(SANTONI)
+ 	/* Stage 0: write white pixels to simplefb (0x90001000) with MMU off */
+ 	MOV64	x0, 0x90001000
+ 	mov		w1, #-1
+@@ -687,7 +696,27 @@ Lkernelcache_base_found:
+ 	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
+ 	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
+ 
+-#if defined(SANTONI)
++#if defined(OXYGEN)
++	/*
++	 * Splash framebuffer: five 2MB Normal-NC blocks (0x90000000 - 0x90a00000)
++	 * in the EXISTING V=P L2 table. The 1080x1920x4 ABL continuous-splash
++	 * window at 0x90001000 needs four; the fifth is a guard block. Both
++	 * framebuffer and RAM use L1 index 0. In 4K mode all bring-up RAM is
++	 * below 4GB, so the first V=P L2 page is bootstrap_pagetables +
++	 * 2*PGBYTES.
++	 */
++	MOV64	x10, 0x90000000
++	mov	x9, #5
++1:	MOV64	x11, (ARM_TTE_TYPE_BLOCK | ARM_TTE_VALID | ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) | ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_WRITECOMB) | ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX)
++	orr	x11, x11, x10
++	and	x12, x10, #(ARM_TT_L2_INDEX_MASK)
++	lsr	x12, x12, #(ARM_TT_L2_SHIFT)
++	add	x13, x25, #(2 * PGBYTES)
++	str	x11, [x13, x12, lsl #TTE_SHIFT]
++	add	x10, x10, #(ARM_TT_L2_SIZE)
++	subs	x9, x9, #1
++	b.ne	1b
++#elif defined(SANTONI)
+ 	/*
+ 	 * Splash framebuffer: two 2MB Normal-NC blocks (0x90000000 - 0x90400000)
+ 	 * in the EXISTING V=P L2 table. Both framebuffer and RAM use L1 index 0.
+@@ -868,7 +897,16 @@ common_start:
+ 	MSR_SCTLR_EL1_X0
+ 	isb		sy
+ 
+-#if defined(SANTONI)
++#if defined(OXYGEN)
++	/* Stage 1: blue band after the white one (32 rows of 1080 32bpp pixels) */
++	MOV64	x0, (0x90001000 + 1080 * 32 * 4)
++	mov		w1, #0xff
++	mov		x2, #(1080 * 32)
++1:	str		w1, [x0], #4
++	subs	x2, x2, #1
++	b.ne	1b
++	dsb		sy
++#elif defined(SANTONI)
+ 	/* Stage 1: write blue block to simplefb after SCTLR_EL1.M MMU activation */
+ 	MOV64	x0, (0x90001000 + 720 * 32 * 4)
+ 	mov		w1, #0xff
+diff --git a/osfmk/arm64/sweet_early.c b/osfmk/arm64/sweet_early.c
+index 0940d2c..ba01122 100644
+--- a/osfmk/arm64/sweet_early.c
++++ b/osfmk/arm64/sweet_early.c
+@@ -11,7 +11,19 @@
+ #include <stdint.h>
+ #include <kern/misc_protos.h>
+ 
+-#if defined(SANTONI)
++#if defined(OXYGEN)
++/* Mi Max 2: 1080x1920 32bpp BGRA continuous splash at 0x90001000. */
++static volatile uint32_t *early_fb = (volatile uint32_t *)(uintptr_t)0x90001000;
++#define EARLY_FB early_fb
++#define EARLY_WIDTH 1080u
++#define EARLY_HEIGHT 1920u
++#define EARLY_STRIDE (4320u / 4)
++#define EARLY_SCALE 2u
++#define EARLY_CELL_W (8u * EARLY_SCALE)
++#define EARLY_CELL_H (16u * EARLY_SCALE)
++#define EARLY_ROWS ((EARLY_HEIGHT - 32u) / EARLY_CELL_H)
++#define EARLY_COLS (EARLY_WIDTH / EARLY_CELL_W)
++#elif defined(SANTONI)
+ static volatile uint8_t *early_fb = (volatile uint8_t *)(uintptr_t)0x90001000;
+ #define EARLY_FB early_fb
+ #define EARLY_W 720u
+@@ -52,7 +64,7 @@ static unsigned int early_started, early_disabled, early_panicking;
+ static void
+ sweet_early_clear_row(void)
+ {
+-#if defined(SANTONI)
++#if defined(SANTONI) && !defined(OXYGEN)
+ 	for (unsigned int y = 0; y < EARLY_CELL_H; y++) {
+ 		for (unsigned int x = 0; x < EARLY_W; x++) {
+ 			early_pixel24(x, early_row * EARLY_CELL_H + y, 0x00000000u);
+@@ -93,7 +105,7 @@ sweet_early_putc(char c)
+ 	const unsigned char *glyph = iso_font + (unsigned char)c * 16;
+ 	for (unsigned int gy = 0; gy < 16; gy++) {
+ 		for (unsigned int sy = 0; sy < EARLY_SCALE; sy++) {
+-#if defined(SANTONI)
++#if defined(SANTONI) && !defined(OXYGEN)
+ 			unsigned int py = early_row * EARLY_CELL_H + gy * EARLY_SCALE + sy;
+ 			for (unsigned int gx = 0; gx < 8; gx++) {
+ 				uint32_t pixel = (glyph[gy] & (1u << gx)) ? 0x00ffffffu : 0x00000000u;
+@@ -132,7 +144,7 @@ sweet_early_mark(unsigned int stage, const char *label)
+ 		return;
+ 	}
+ 	uint32_t color = 0xff00ff00u | ((stage & 7u) * 32u << 16);
+-#if defined(SANTONI)
++#if defined(SANTONI) && !defined(OXYGEN)
+ 	for (unsigned int y = (EARLY_H > 32 ? EARLY_H - 32 : 0); y < EARLY_H; y++) {
+ 		for (unsigned int x = stage * 48; x < (stage + 1) * 48; x++) {
+ 			early_pixel24(x, y, color);
+@@ -187,8 +199,10 @@ void
+ sweet_early_relocate(uint64_t base)
+ {
+ 	sweet_early_mark(8, "leaving bootstrap TTBR0");
+-#if defined(SANTONI)
++#if defined(SANTONI) && !defined(OXYGEN)
+ 	early_fb = (volatile uint8_t *)(uintptr_t)(base + 0x1000);
++#elif defined(OXYGEN)
++	early_fb = (volatile uint32_t *)(uintptr_t)(base + 0x1000);
+ #else
+ 	early_fb = (volatile uint32_t *)(uintptr_t)base;
+ #endif
+diff --git a/osfmk/console/serial_console.c b/osfmk/console/serial_console.c
+index 6d1b177..8117b26 100644
+--- a/osfmk/console/serial_console.c
++++ b/osfmk/console/serial_console.c
+@@ -267,7 +267,7 @@ _cnputc(char c, bool poll)
+  *             waiting for an interrupt when the hardware device isn't ready
+  * @param size The number of characters to print to the console.
+  */
+-#if defined(ARM64_BOARD_CONFIG_SANTONI)
++#if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)
+ extern void santoni_log_append(const char *c, int size);  /* bsd/dev/santoni_sdhci.c */
+ #endif
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+@@ -315,12 +315,12 @@ _cnputs(char *c, int size, bool poll)
+ {
+ 	extern int disableConsoleOutput;
+ 
+-#if defined(ARM64_BOARD_CONFIG_SANTONI)
++#if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)
+ 	santoni_log_append(c, size);
+ #endif
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+-#if !defined(ARM64_BOARD_CONFIG_SANTONI)
+-	/* Santoni logs to SYSTEM, not to the Sweet userdata-tail ring. */
++#if !defined(ARM64_BOARD_CONFIG_SANTONI) && !defined(ARM64_BOARD_CONFIG_OXYGEN)
++	/* Santoni/oxygen log to SYSTEM, not to the Sweet userdata-tail ring. */
+ 	sweet_log_append(c, size);
+ #endif
+ 	if (sweet_console_muted && !panic_active()) {
+diff --git a/osfmk/vm/vm_shared_region.c b/osfmk/vm/vm_shared_region.c
+index efd1699..444f37b 100644
+--- a/osfmk/vm/vm_shared_region.c
++++ b/osfmk/vm/vm_shared_region.c
+@@ -2279,7 +2279,7 @@ vm_shared_region_enter(
+ 		return KERN_FAILURE;
+ 	}
+ 
+-#if defined(ARM64_BOARD_CONFIG_SANTONI)
++#if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)
+ 	/*
+ 	 * The 16 KiB-signed iOS 16 dyld shared cache executes from 4 KiB pages
+ 	 * on Santoni. Disable code-signing enforcement on the region's sub map
+diff --git a/pexpert/pexpert/arm64/Makefile b/pexpert/pexpert/arm64/Makefile
+index 02bcc0f..4fe7eef 100644
+--- a/pexpert/pexpert/arm64/Makefile
++++ b/pexpert/pexpert/arm64/Makefile
+@@ -18,6 +18,7 @@ PRIVATE_KERNELFILES = \
+ 	H13.h \
+ 	VMAPPLE.h \
+ 	BCM2837.h \
++	OXYGEN.h \
+ 	SANTONI.h \
+ 	SWEET.h
+ 
+diff --git a/pexpert/pexpert/arm64/OXYGEN.h b/pexpert/pexpert/arm64/OXYGEN.h
+new file mode 100644
+index 0000000..dee53f4
+--- /dev/null
++++ b/pexpert/pexpert/arm64/OXYGEN.h
+@@ -0,0 +1,38 @@
++#ifndef _PEXPERT_ARM64_OXYGEN_H
++#define _PEXPERT_ARM64_OXYGEN_H
++
++#define NO_MONITOR                    1
++#define NO_ECORE                      1
++
++/*
++ * Xiaomi Mi Max 2 ("oxygen", MSM8953). It shares the QGIC2, SDCC1, GCC,
++ * APPS watchdog, 8x Cortex-A53 topology and 4 KiB pages with santoni, so the
++ * inner SANTONI define keeps that bring-up. OXYGEN only selects the
++ * 1080x1920 32bpp panel geometry in the early console and bootstrap map.
++ */
++#define OXYGEN                        1
++#define SANTONI                       1
++#define SWEET                         1
++#define SWEET_SMP_MAX_CPUS            8
++
++#define ARM_ARCH_TIMER
++#define __ARM_ARCH__                  8
++#define __ARM_VMSA__                  8
++#define __ARM_VFP__                   4
++#define __ARM_COHERENT_CACHE__        1
++#define __ARM_DEBUG__                 7
++#define __ARM_ENABLE_SWAP__           1
++#define __ARM_V8_CRYPTO_EXTENSIONS__  1
++/* oxygen: Cortex-A53 is ARMv8.0 (no PAN). MSR PAN is undefined. */
++#define __ARM_PAN_AVAILABLE__         0
++
++/* Qualcomm MSM8953 has a GICv2 distributor and CPU interface, not GICv3. */
++#define HAS_GIC_V3                    0
++#define SWEET_VTIMER_INTID            20
++#define SWEET_IPI_SGI                 1
++
++#ifndef ASSEMBLER
++#define PLATFORM_PANIC_LOG_DISABLED
++#endif
++
++#endif /* _PEXPERT_ARM64_OXYGEN_H */
+diff --git a/pexpert/pexpert/arm64/board_config.h b/pexpert/pexpert/arm64/board_config.h
+index abaf8cc..6205c4c 100644
+--- a/pexpert/pexpert/arm64/board_config.h
++++ b/pexpert/pexpert/arm64/board_config.h
+@@ -97,7 +97,7 @@
+ #define CORE_NCTRS                     8 /* Placeholder; KPC is not enabled for this target */
+ #endif  /* ARM64_BOARD_CONFIG_BCM2837 */
+ 
+-#if defined(ARM64_BOARD_CONFIG_SWEET) && !defined(ARM64_BOARD_CONFIG_SANTONI)
++#if defined(ARM64_BOARD_CONFIG_SWEET) && !defined(ARM64_BOARD_CONFIG_SANTONI) && !defined(ARM64_BOARD_CONFIG_OXYGEN)
+ #include <pexpert/arm64/SWEET.h>
+ 
+ #define MAX_L2_CLINE                   6
+@@ -118,6 +118,16 @@
+ #define CORE_NCTRS                     8
+ #endif  /* ARM64_BOARD_CONFIG_SANTONI */
+ 
++#ifdef ARM64_BOARD_CONFIG_OXYGEN
++#include <pexpert/arm64/OXYGEN.h>
++
++#define MAX_L2_CLINE                   6
++#define MAX_CPUS                       8
++#define MAX_CPU_CLUSTERS               1
++
++#define CORE_NCTRS                     8
++#endif  /* ARM64_BOARD_CONFIG_OXYGEN */
++
+ #ifdef ARM64_BOARD_CONFIG_VMAPPLE
+ #include <pexpert/arm64/VMAPPLE.h>
+ 
