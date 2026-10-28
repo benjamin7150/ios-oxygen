@@ -35,30 +35,53 @@
   Oxygen: `dram-base 0x91400000`, `dram-size 0x1ec00000`, fbcon 1080x1920
   depth 32 stride 4320, native canvas 1080x1920, `display-scale 3`, root
   compatible `D21AP|iPhone10,2|xiaomi,oxygen|xiaomi,sweet|qcom,msm8953|AppleARM`,
-  chip-id `0x8015`, and **no** `home-button-type` (Home-button device).
-  Santoni output is unchanged (canvas 1125x2436 default, scale 2).
+  chip-id `0x8015`, and `home-button-type 1`. The real D21AP ADT has
+  `home-button-type = 1` (D22AP has 2), so the earlier "omit it" plan was
+  wrong; `/product` (61 props) is now copied from the donor. Santoni output is
+  unchanged (canvas 1125x2436 default, scale 2, home-button-type 2).
+- **Donor tree (done, ignored):** extracted `Firmware/all_flash/DeviceTree.d21ap.im4p`
+  from the iPhone 8 Plus iOS 16.7.16 (20H392) IPSW with `tools/remotezip.py`,
+  decompressed the LZFSE payload with the PyPI `lzfse` module, and saved
+  `research/ipsw-8plus/d21ap.adt` (185,432 B). `mkadt.py` now includes
+  `/product` (no warning) and prints `artwork-display-gamut` as sRGB.
+- **Oxygen stock boot image (read-only, ignored):** pulled `mmcblk0p59`
+  (64 MiB) over adb root to `resources/oxygen-boot.img` (sha256
+  `a5db8258...ddc9a616`). It is boot header v0: gzip kernel 15,529,602 B,
+  ramdisk 1,505,917 B, **no dtb/second section**. The kernel tail is a single
+  raw FDT (270,247 B, magic `d00dfeed`, msm-id `0x125`, board-id `0x1a`), not
+  a Qualcomm `dt_table`. Saved as `resources/oxygen_appended_dtbs.bin` (sha256
+  `82234051...c2b04de1`); `shim/build.sh` already appends that exact path.
+  The live `/sys/firmware/fdt` (`resources/oxygen.dtb`, 271,211 B) is the
+  same tree with ABL's `/chosen` bootargs/initrd added.
+- **Local shim build:** no clang/lld on this host, but the shim builds cleanly
+  with `aarch64-linux-gnu-gcc` + `aarch64-linux-gnu-ld` (entry 0, no
+  relocations, 180,224 B Image). A shim-only oxygen boot image with the stock
+  appended FDT and an empty cpio ramdisk is at
+  `/tmp/shim-gcc/shim-oxygen-test.img` (454,656 B, sha256 `babe270b...870fbdd`).
+  It stops at `LOADER no SWEETXNU payload` after painting the 1080x1920
+  console, which is still a useful panel/board smoke test.
 - **Tests/CI:** `tests/run_tests.sh` gained `OXY-01`; full suite passes locally
   with `CC=gcc HOST_CC=gcc`. The workflow skip guard now also fails if
-  `014[2345]-(santoni|oxygen)` is skipped. Oxygen kernel build has **not** run
-  yet.
+  `014[2345]-(santoni|oxygen)` is skipped. `gh` is not installed here and there
+  are no git credentials, so the GitHub build/push was intentionally skipped
+  per user instruction; the oxygen kernel build has **not** run yet.
 - **Open items:**
-  1. Run the OXYGEN CI build and fix compile errors.
-  2. `resources/oxygen_appended_dtbs.bin` does not exist. `shim/build.sh` falls
-     back to appending the raw live FDT (`../oxygen.dtb`), but Qualcomm ABL
-     normally scans for a `dt_table` (`0xd7b7d00a`), not a bare FDT. Pull the
-     stock oxygen boot image read-only with adb and extract its dtb table with
-     `tools/unpack_bootv2.py`; if the stock image only has a raw FDT, build a
-     minimal one-entry dt_table with the live oxygen DTB and its
-     `qcom,msm-id`/`qcom,board-id` values.
-  3. Extract the iPhone 8 Plus donor tree to
-     `research/ipsw-8plus/d21ap.adt` so `/product` is populated (mkadt currently
-     warns and omits it).
-  4. No hardware boot attempted yet; Android data and all partitions are
+  1. Build the OXYGEN kernel (CI or another Mac) and fix compile errors;
+     then pack it with `shim/build.sh <kernel> --board oxygen`.
+  2. Display identity: the real iPhone 8 Plus UI is 414x736 pt @3x
+     (1242x2208 canvas) while our native canvas is 1080x1920 @3x
+     (360x640 pt, not a real screen size; UIKit's "No status bar visual
+     provider" red bar is possible). The driver's non-native mode is still
+     hard-coded to the iPhone X 1125x2436 canvas. Expected fix later: present
+     the D21AP 1242x2208 logical canvas and downscale (MDP or CPU) to the
+     1080x1920 panel, or verify that the 8 Plus frameworks use the product
+     type's fixed bounds. Record the observed result after the first boot.
+  3. No hardware boot attempted yet; Android data and all partitions are
      untouched (the persistent console log stays off unless `sweetlog=1`).
-- **Next concrete action:** push this commit, run
-  `gh workflow run xnu.yml -f machine_config=OXYGEN`, download the kernel
-  artifact, then `shim/build.sh <kernel> --board oxygen`; stage the resulting
-  `shim-boot.img` for a non-destructive `fastboot boot`.
+- **Next concrete action:** boot the prepared shim-only image with
+  `adb reboot bootloader` + `fastboot boot /tmp/shim-gcc/shim-oxygen-test.img`
+  after user confirmation (non-destructive), observe the 1080x1920 console,
+  then build/obtain the oxygen kernel and repeat with the full payload.
 
 ## dff9f18 (2026-10-22): fix EL1 permission fault on `/dev/remmcroot0` reads
 

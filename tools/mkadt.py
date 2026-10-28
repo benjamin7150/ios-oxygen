@@ -66,7 +66,7 @@ IDENTITY = {
                     home_button_type=2, adt='../research/ipsw-x/d22ap.adt'),
     'oxygen': dict(dt='D21AP', model='iPhone10,2', product='iPhone10,2',
                    target_type='D21', target_sub='D21AP', chip_id=0x8015,
-                   home_button_type=None, adt='../research/ipsw-8plus/d21ap.adt'),
+                   home_button_type=1, adt='../research/ipsw-8plus/d21ap.adt'),
 }
 
 
@@ -262,9 +262,10 @@ def build(seed=None, qemu=False, native=False, board=BOARD):
     # as a plain plist instead of decrypting it with the effaceable key.
     defaults = node('defaults', [ph(), ('no-effaceable-storage', u32(1))])
 
-    # MobileGestalt HomeButtonType = IODeviceTree:/buttons home-button-type
-    # (iPhone X: 2, no Home button; absent = 0 = Home-button device such as the
-    # iPhone 8 Plus that oxygen impersonates).
+    # MobileGestalt HomeButtonType = IODeviceTree:/buttons home-button-type.
+    # The real donor trees say iPhone X (D22AP) = 2 (no Home button) and
+    # iPhone 8 Plus (D21AP) = 1 (Home button); copy the donor's value.
+    # (Absent = 0, which is not what the 8 Plus userland expects.)
     button_props = [ph(),
                     ('button-names', cstr('volup') + cstr('voldown') + cstr('hold')),
                     ('opposed-power-vol-buttons', u32(1))]
