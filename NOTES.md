@@ -71,7 +71,9 @@
   continuous-splash window is **BGR24 at 0x90001000, stride 3240**. No
   partitions were written; Android rebooted afterward.
 - **Tests/CI (2026-10-28/29):** `tests/run_tests.sh` gained `OXY-01`,
-  `OXY-02` (0019/0020/0026 must accept `OXYGEN`) and `CI-01` (0146).
+  `OXY-02` (0019/0020/0026 must accept `OXYGEN`), `OXY-03` (shim ADT CPU
+  state rewrite for boot IDs `0x100` and `0x0`), `OXY-04` (0147 oxygen
+  boot-core check) and `CI-01` (0146).
   `CC=gcc HOST_CC=gcc bash tests/run_tests.sh` passes all host tests, patch
   structure checks and those assertions. `0145` is clean (16 files, 28
   hunks) and applies to a post-0144 tree (`/tmp/xnu-verify`); `0146` adds
@@ -125,17 +127,31 @@
   `e698b1ef10db02c612ea1ab6aeff805896bcb2521e42467448bbf0efe0360947`.
   The previous fixed payload accidentally had the DTB appended twice; the
   clean build now appends it once.
-- **Fixed payload (clean, staged, not yet booted):** payload sha256
+- **Fixed payload (clean, booted once):** payload sha256
   `9c36f8e7e048040abfd1128688249e4edcf461b89a949e65885aa0681fae8725`
   (16,722,064 B); boot image
   `/tmp/opencode/oxygen-payload-fixed-clean/shim-boot.img`, sha256
   `e44d745fdaf1dc7115ef9212d05f563f352ff14858fa6ec0eac2be1df2e3f07b`
-  (17,176,576 B). It is staged at `/storage/emulated/0/shim-boot.img` and
-  the on-device sha256 matches the host file.
+  (17,176,576 B). It was staged at `/storage/emulated/0/shim-boot.img`
+  (on-device hash matched) and booted once.
+- **Second boot (2026-10-29):** the fixed shim got past the topology, and
+  the kernel reported the real boot core:
+  ```
+  SWEET EARLY PANIC: SWEET CPU: expected boot MPIDR 0x100 and logical CPU 0,
+  got 0x0/0 SweetCPU.cpp:153
+  ```
+  This confirms oxygen's ABL starts XNU on cluster 0/core 0 (`MPIDR 0x0`),
+  while `0082-topaz-boot-on-gold-cpu.patch` hard-coded the santoni/topaz
+  gold core `0x100`. No partitions were written.
+- **Kernel fix (pending CI):** `0147-oxygen-sweet-boot-cpu.patch` selects
+  `expected_boot_phys = 0x0` when `ARM64_BOARD_CONFIG_OXYGEN` is defined and
+  leaves `0x100` for santoni/sweet. `tests/run_tests.sh` adds **OXY-04** for
+  the boot-core selection; all host tests and patch checks pass. A new x64
+  kernel artifact is required before the next payload can be packed.
 - **Open items:**
-  1. Boot the fixed payload and record `BOOT_CPU`, the loader output and
-     whether the oxygen kernel/HFS/PID 1 path gets past the old
-     `machine_routines.c:1244` panic.
+  1. Rebuild the kernel with 0147, repack the oxygen payload, stage it and
+     boot again. Record `BOOT_CPU`, the loader output and whether the
+     kernel/HFS/PID 1 path gets past `SweetCPU.cpp:153`.
   2. Display identity: the real iPhone 8 Plus UI is 414x736 pt @3x
      (1242x2208 canvas) while our native canvas is 1080x1920 @3x
      (360x640 pt, not a real screen size; UIKit's "No status bar visual
@@ -151,11 +167,14 @@
   geometry) on `santoni`; `1e2df98` (x64 runner + 0146), `76a66ec`
   (OXYGEN staging) and `bf8d73c` (OXYGEN gates + HFS compat) on `ci-x64`.
   Both branches are pushed to `fork`.
-- **Next concrete action:** ask before `adb reboot bootloader`; then run
-  `fastboot boot /tmp/opencode/oxygen-payload-fixed-clean/shim-boot.img`.
-  `fastboot` must use the host path; `/storage/emulated/0/shim-boot.img` is
-  only the on-device backup. Record `BOOT_CPU`, the displayed loader/panic
-  output and update this section.
+- **Next concrete action:** push 0147, start the x64 CI build, download the
+  new oxygen kernel, repack with the shim base
+  `/tmp/opencode/shim-final/shim-base.img`, stage it and boot it. The
+  device is currently sitting on the `SweetCPU.cpp:153` panic screen;
+  power-cycle/reboot it before the next `adb reboot bootloader`. `fastboot`
+  must use the host path; `/storage/emulated/0/shim-boot.img` is only a
+  backup. Record `BOOT_CPU`, the displayed loader/panic output and update
+  this section.
 
 ## dff9f18 (2026-10-22): fix EL1 permission fault on `/dev/remmcroot0` reads
 

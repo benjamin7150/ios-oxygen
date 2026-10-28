@@ -126,7 +126,7 @@ jobs:
           if [ ! -f build.log ]; then
             echo "no build.log (build never started)"; exit 0
           fi
-          if grep -E 'Skipping patch .*014[23456]-(santoni|oxygen|iig)' build.log; then
+          if grep -E 'Skipping patch .*014[234567]-(santoni|oxygen|iig)' build.log; then
             echo "::error::a Santoni storage, oxygen board or iig compatibility patch was skipped by the build"
             exit 1
           fi

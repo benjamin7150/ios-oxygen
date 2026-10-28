@@ -1,0 +1,27 @@
+diff --git a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -146,11 +146,19 @@
+ 		IOSleep(1);
+ 	}
+ 	/*
+-	 * topaz / santoni: the shim boots xnu on gold CPU 0x100.
++	 * SANTONI boots on gold CPU 0x100; oxygen's ABL starts on cluster 0
++	 * core 0, MPIDR 0x0. The shim makes the executing node logical CPU 0.
+ 	 */
+-	if (topology->boot_cpu->cpu_id != 0 || topology->boot_cpu->phys_id != 0x100) {
+-		panic("SWEET CPU: expected boot MPIDR 0x100 and logical CPU 0, got 0x%x/%u",
+-		    topology->boot_cpu->phys_id, topology->boot_cpu->cpu_id);
++#if defined(ARM64_BOARD_CONFIG_OXYGEN)
++	const uint32_t expected_boot_phys = 0x0;
++#else
++	const uint32_t expected_boot_phys = 0x100;
++#endif
++	if (topology->boot_cpu->cpu_id != 0 ||
++	    topology->boot_cpu->phys_id != expected_boot_phys) {
++		panic("SWEET CPU: expected boot MPIDR 0x%x and logical CPU 0, got 0x%x/%u",
++		    expected_boot_phys, topology->boot_cpu->phys_id,
++		    topology->boot_cpu->cpu_id);
+ 	}
+ 	for (unsigned int i = 0; i < topology->num_cpus; i++) {
+ 		SweetCPU *cpu = __atomic_load_n(&sweet_cpus[i], __ATOMIC_ACQUIRE);

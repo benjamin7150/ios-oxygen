@@ -23,6 +23,7 @@ P143="xnu/patches/0143-santoni-persistent-console-log.patch"
 P144="xnu/patches/0144-santoni-4k-unsigned-dyld-cache.patch"
 P145="xnu/patches/0145-oxygen-board-target.patch"
 P146="xnu/patches/0146-iig-kernelcontent.patch"
+P147="xnu/patches/0147-oxygen-sweet-boot-cpu.patch"
 
 echo "== host unit tests (-Wall -Wextra) =="
 for t in test_sdhci_mock test_gpt_parser test_log_ring; do
@@ -280,6 +281,13 @@ for boot_phys in 0x100 0x0; do
 done
 echo "ok   the shim changes only the executing CPU's /cpus state"
 
+echo "== OXY-04: oxygen's SweetCPU boot-core check uses MPIDR 0x0 (0147) =="
+python3 tools/check_patch.py "$P147" -q \
+	--added-contains 'iokit/Kernel/arm/SweetCPU.cpp:#if defined(ARM64_BOARD_CONFIG_OXYGEN)' \
+	--added-contains 'iokit/Kernel/arm/SweetCPU.cpp:const uint32_t expected_boot_phys = 0x0;' \
+	--added-contains 'iokit/Kernel/arm/SweetCPU.cpp:expected_boot_phys, topology->boot_cpu->phys_id'
+echo "ok   0147 accepts the ABL boot core 0x0 only for OXYGEN"
+
 echo "== CI-01: Xcode 16 iig expects the kernel-side IORPC.kernelContent field (0146) =="
 python3 tools/check_patch.py "$P146" -q \
 	--added-contains 'iokit/IOKit/IORPC.h:#ifdef KERNEL' \
@@ -292,8 +300,8 @@ if [ -n "${XNU_SRC:-}" ]; then
 	echo "== git apply --check against XNU_SRC=$XNU_SRC =="
 	(cd "$XNU_SRC" && git apply --check \
 	    "$OLDPWD/$P142" "$OLDPWD/$P143" "$OLDPWD/$P144" "$OLDPWD/$P145" \
-	    "$OLDPWD/$P146")
-	echo "ok   all five patches apply to $XNU_SRC"
+	    "$OLDPWD/$P146" "$OLDPWD/$P147")
+	echo "ok   all six patches apply to $XNU_SRC"
 fi
 
 echo "run_tests: all hosts tests, patch checks and shipped-code assertions passed"
