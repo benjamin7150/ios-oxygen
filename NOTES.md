@@ -94,8 +94,8 @@
      not been booted. Android data and all partitions are untouched (the
      persistent console log stays off unless `sweetlog=1`).
 - **Commits (branch `santoni`, not pushed):** `4843f14` (board target),
-  `e20be29` (D21AP HomeButtonType); the 24bpp shim/ADT/kernel-patch follow-up
-  is the next commit after `e20be29` (see `git log`).
+  `e20be29` (D21AP HomeButtonType), `2c2efbb` (BGR24 early console and
+  hardware-confirmed shim geometry).
 - **Next concrete action:** obtain an oxygen kernel build and run
   `shim/build.sh <kernel> --board oxygen`; validate the resulting boot image
   with the loader tests, then `fastboot boot` it after user confirmation.
