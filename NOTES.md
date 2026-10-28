@@ -79,12 +79,28 @@
   Run `40778852248` (`macos-15-intel`, Xcode 16) failed after 14m15s because
   0019/0020/0026 exited early for `MACHINE_CONFIG=OXYGEN`, so
   `sweet_bearssl`, `sweet_libpthread` and HFS sources were missing. Fixed
-  in `76a66ec`; run `40781407165` was then dispatched on the same branch.
+  in `76a66ec`; run `40781407165` then failed after 25m19s because the
+  0019/0020 Makefile gates still filtered only `SWEET SANTONI`, so the
+  OXYGEN compile omitted `TargetConditionals.h`, BearSSL `inner.h`, and the
+  HFS compat/include paths. Fixed in `bf8d73c` by adding `OXYGEN` to both
+  gates and teaching the HFS compat header the private `struct vnode` and
+  `sysctlbyname` KPI. Run `40786025333` (`macos-15-intel`, Xcode 16,
+  `OXYGEN`, DEVELOPMENT) succeeded in 21m13s; its `xnu-kernel` artifact
+  contains `kernel.development.oxygen` (17,297,400 B, Mach-O arm64, sha256
+  `c95614cfb33fe273ae00621c49822b51abcf380dbd98bccfb48a0ad40fb47c05`)
+  with the `SWEET HFS: hfs-627.100.6 registered` string.
+- **Payload:** packed with `/tmp/opencode/build_oxygen_payload.sh`, the
+  24bpp shim (`/tmp/shim-gcc24/Image`), the oxygen DTB and static
+  `/tmp/opencode/init-test/init.macho` (16,635 B). Payload sha256
+  `8c0684b3ce5d805c0a83e97a8fa583936c5a0990c789ef708f9116c8e6935129`;
+  boot image sha256
+  `fbd7c16db74744330a859f35997213c42fc4b1eaf3805169378ffab55b8a4bbe`
+  (17,446,912 B). The image is staged at
+  `/storage/emulated/0/shim-boot.img` and its on-device sha256 matches.
 - **Open items:**
-  1. Finish OXYGEN kernel CI (`40781407165`, x64/Xcode 16); download
-     `kernel.development.oxygen` when green and pack it with the local
-     hardware-confirmed shim (`/tmp/shim-gcc24/Image`) and static
-     `/tmp/opencode/init-test/init.macho` (16,635 B).
+  1. Boot the full payload. The staged image has not been booted; the
+     24bpp shim-only image was already hardware-confirmed, so the pending
+     test is specifically the oxygen kernel + HFS + PID 1 payload.
   2. Display identity: the real iPhone 8 Plus UI is 414x736 pt @3x
      (1242x2208 canvas) while our native canvas is 1080x1920 @3x
      (360x640 pt, not a real screen size; UIKit's "No status bar visual
@@ -93,19 +109,16 @@
      the D21AP 1242x2208 logical canvas and downscale (MDP or CPU) to the
      1080x1920 panel, or verify that the 8 Plus frameworks use the product
      type's fixed bounds. Record the observed result after the first boot.
-  3. The shim-only hardware boot has passed; the **full kernel** payload has
-     not been booted. Android data and all partitions are untouched (the
-     persistent console log stays off unless `sweetlog=1`).
+  3. Android data and all partitions are untouched (the persistent console
+     log stays off unless `sweetlog=1`).
 - **Commits:** `4843f14` (board target), `e20be29` (D21AP HomeButtonType),
   `2c2efbb`/`005927c` (BGR24 early console and hardware-confirmed shim
-  geometry) on `santoni`; `1e2df98` (x64 runner + 0146) and `76a66ec`
-  (OXYGEN staging) on `ci-x64`. Both branches are pushed to `fork`.
-- **Next concrete action:** finish run `40781407165`, download the kernel,
-  pack it with `/tmp/opencode/build_oxygen_payload.sh <kernel>` (24bpp shim
-  plus `init.macho`), validate the image, then confirm and run the
-  non-destructive `fastboot boot`. The 24bpp shim-only image is already
-  hardware-confirmed, so do not repeat that boot unless the board profile
-  changes.
+  geometry) on `santoni`; `1e2df98` (x64 runner + 0146), `76a66ec`
+  (OXYGEN staging) and `bf8d73c` (OXYGEN gates + HFS compat) on `ci-x64`.
+  Both branches are pushed to `fork`.
+- **Next concrete action:** ask before `adb reboot bootloader`; then run
+  the non-destructive `fastboot boot /storage/emulated/0/shim-boot.img`.
+  Record the displayed loader/panic output and update this section.
 
 ## dff9f18 (2026-10-22): fix EL1 permission fault on `/dev/remmcroot0` reads
 
