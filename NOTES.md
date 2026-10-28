@@ -68,20 +68,23 @@
   (expected with the empty ramdisk). This confirms the oxygen ABL
   continuous-splash window is **BGR24 at 0x90001000, stride 3240**. No
   partitions were written; Android rebooted afterward.
-- **Tests/CI (2026-10-28):** `tests/run_tests.sh` gained `OXY-01`;
-  `CC=gcc HOST_CC=gcc bash tests/run_tests.sh` passes all host tests, all
-  patch structure checks and OXY-01. `python3 tools/check_patch.py
-  xnu/patches/0145-oxygen-board-target.patch` is clean (16 files, 28 hunks)
-  and `git apply --check` succeeds against a clean post-0144 tree
-  (`/tmp/xnu-verify`). The workflow skip guard now also fails if
-  `014[2345]-(santoni|oxygen)` is skipped. `gh` is not installed here and
-  there are no git credentials, so the GitHub build/push was intentionally
-  skipped per user instruction; the oxygen kernel itself has **not** been
-  compiled.
+- **Tests/CI (2026-10-28/29):** `tests/run_tests.sh` gained `OXY-01`,
+  `OXY-02` (0019/0020/0026 must accept `OXYGEN`) and `CI-01` (0146).
+  `CC=gcc HOST_CC=gcc bash tests/run_tests.sh` passes all host tests, patch
+  structure checks and those assertions. `0145` is clean (16 files, 28
+  hunks) and applies to a post-0144 tree (`/tmp/xnu-verify`); `0146` adds
+  Xcode 16's kernel-side `IORPC.kernelContent` field. `gh` is installed at
+  `/tmp/opencode/bin/gh` and authenticated as `benjamin7150`; `origin` is
+  read-only, so CI uses fork `benjamin7150/ios-santoni`, branch `ci-x64`.
+  Run `40778852248` (`macos-15-intel`, Xcode 16) failed after 14m15s because
+  0019/0020/0026 exited early for `MACHINE_CONFIG=OXYGEN`, so
+  `sweet_bearssl`, `sweet_libpthread` and HFS sources were missing. Fixed
+  in `76a66ec`; run `40781407165` was then dispatched on the same branch.
 - **Open items:**
-  1. Build the OXYGEN kernel (another Mac, or a local XNU build environment)
-     and fix compile errors; then pack it with
-     `shim/build.sh <kernel> --board oxygen`.
+  1. Finish OXYGEN kernel CI (`40781407165`, x64/Xcode 16); download
+     `kernel.development.oxygen` when green and pack it with the local
+     hardware-confirmed shim (`/tmp/shim-gcc24/Image`) and static
+     `/tmp/opencode/init-test/init.macho` (16,635 B).
   2. Display identity: the real iPhone 8 Plus UI is 414x736 pt @3x
      (1242x2208 canvas) while our native canvas is 1080x1920 @3x
      (360x640 pt, not a real screen size; UIKit's "No status bar visual
@@ -93,14 +96,16 @@
   3. The shim-only hardware boot has passed; the **full kernel** payload has
      not been booted. Android data and all partitions are untouched (the
      persistent console log stays off unless `sweetlog=1`).
-- **Commits (branch `santoni`, not pushed):** `4843f14` (board target),
-  `e20be29` (D21AP HomeButtonType), `2c2efbb` (BGR24 early console and
-  hardware-confirmed shim geometry).
-- **Next concrete action:** obtain an oxygen kernel build and run
-  `shim/build.sh <kernel> --board oxygen`; validate the resulting boot image
-  with the loader tests, then `fastboot boot` it after user confirmation.
-  The 24bpp shim-only image is already hardware-confirmed, so do not repeat
-  that boot unless the board profile changes.
+- **Commits:** `4843f14` (board target), `e20be29` (D21AP HomeButtonType),
+  `2c2efbb`/`005927c` (BGR24 early console and hardware-confirmed shim
+  geometry) on `santoni`; `1e2df98` (x64 runner + 0146) and `76a66ec`
+  (OXYGEN staging) on `ci-x64`. Both branches are pushed to `fork`.
+- **Next concrete action:** finish run `40781407165`, download the kernel,
+  pack it with `/tmp/opencode/build_oxygen_payload.sh <kernel>` (24bpp shim
+  plus `init.macho`), validate the image, then confirm and run the
+  non-destructive `fastboot boot`. The 24bpp shim-only image is already
+  hardware-confirmed, so do not repeat that boot unless the board profile
+  changes.
 
 ## dff9f18 (2026-10-22): fix EL1 permission fault on `/dev/remmcroot0` reads
 
