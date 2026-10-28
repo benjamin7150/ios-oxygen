@@ -117,7 +117,7 @@ jobs:
           bash build.sh 2>&1 | tee ../build.log
           ccache -s
 
-      - name: Fail if a Santoni storage patch was skipped
+      - name: Fail if a required patch or source stage was skipped
         if: always()
         run: |
           # dxb applies patches with `git apply --check` and only warns on
@@ -130,7 +130,15 @@ jobs:
             echo "::error::a Santoni storage, oxygen board or iig compatibility patch was skipped by the build"
             exit 1
           fi
-          echo "no Santoni storage, oxygen board or iig compatibility patch skipped"
+          for marker in 'Staged libpthread-514.100.2' \
+                        'Staged BearSSL portable AES' \
+                        'Staged hfs-627.100.6'; do
+            if ! grep -q "$marker" build.log; then
+              echo "::error::required source stage did not run: $marker"
+              exit 1
+            fi
+          done
+          echo "no required patch or source stage was skipped"
 
       - name: Package build tree for local compiles
         if: always()

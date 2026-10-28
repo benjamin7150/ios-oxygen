@@ -247,6 +247,17 @@ python3 tools/check_patch.py "$P145" -q \
 	--added-contains 'osfmk/console/serial_console.c:#if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)'
 echo "ok   0145 adds the OXYGEN target, 1080x1920 BGR24 early console and four-block NC alias"
 
+echo "== OXY-02: oxygen runs the SWEET source-staging scripts (0019/0020/0026) =="
+for s in xnu/patches/0019-stage-libpthread.sh \
+         xnu/patches/0020-stage-bearssl.sh \
+         xnu/patches/0026-stage-hfs.sh; do
+	if ! grep -q 'OXYGEN' "$s"; then
+		echo "error: $s does not run for OXYGEN" >&2
+		exit 1
+	fi
+done
+echo "ok   0019/0020/0026 stage libpthread, BearSSL and HFS for oxygen"
+
 echo "== CI-01: Xcode 16 iig expects the kernel-side IORPC.kernelContent field (0146) =="
 python3 tools/check_patch.py "$P146" -q \
 	--added-contains 'iokit/IOKit/IORPC.h:#ifdef KERNEL' \
