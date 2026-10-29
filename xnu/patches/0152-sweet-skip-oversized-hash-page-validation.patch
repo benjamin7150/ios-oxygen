@@ -1,0 +1,27 @@
+diff --git a/bsd/kern/ubc_subr.c b/bsd/kern/ubc_subr.c
+--- a/bsd/kern/ubc_subr.c
++++ b/bsd/kern/ubc_subr.c
+@@ -5756,6 +5756,23 @@
+ 		if (cd != NULL) {
+ 			/* all CD's that have been injected is already validated */
+ 
++#if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)
++			/*
++			 * 0151 keeps the blob of binaries signed with 16 KiB hash
++			 * units (pageSize 14) so F_ADDFILESIGS_RETURN can report
++			 * real coverage. A 4 KiB page fault can never cover a whole
++			 * 16 KiB hash unit, and the per-page offset is not aligned
++			 * to the hash unit, so the normal hashing path would panic
++			 * below. Boot such pages as unsigned: report the whole unit
++			 * as processed and validated.
++			 */
++			if (blob->csb_hash_pageshift > PAGE_SHIFT) {
++				*bytes_processed = 1U << blob->csb_hash_pageshift;
++				*tainted = 0;
++				return TRUE;
++			}
++#endif
++
+ 			hashtype = blob->csb_hashtype;
+ 			if (hashtype == NULL) {
+ 				panic("unknown hash type ?");

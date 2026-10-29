@@ -324,10 +324,30 @@
   Rebuilt `payload-realroot.bin` `4ad7cb41…` and
   `shim-boot-realroot.img` `49e2ae54…` (kernel half 450471 B unchanged,
   payload 16704512 B, cmdline includes `cs_enforcement_disable=1`).
-- **Next: boot `fastboot boot /home/moron/ios/oxygen-0148/shim-boot-realroot.img`**
-  (userdata unchanged, no flash). Expect dyld's `F_ADDFILESIGS_RETURN` to
-  report real coverage, the cache to map, and libSystem to load; if it panics,
-  photograph the lines above `SWEET EARLY PANIC`.
+- **Boot of `49e2ae54…` (kernel `8cab9305`, 0151): NEW PANIC**
+  `SWEET EARLY PANIC: offset not aligned to cshash boundary @ ubc_subr.c:5767`.
+  This is progress: `0151` cleared dyld's `F_ADDFILESIGS_RETURN` coverage gate
+  (no more `code signature does not cover entire shared cache file`) and the
+  cache/libSystem pages now fault in and reach XNU page-signature validation.
+  The panic is the case `0144` warned about, now reachable because the blob is
+  attached: iOS 16 binaries/cache are signed with 16 KiB hash units
+  (`csb_hash_pageshift = cd->pageSize = 14`) but Santoni/OXYGEN has 4 KiB
+  pages, so a 4 KiB page fault at offset 0x1000/0x2000/0x3000 is not aligned
+  to the hash unit and `cs_validate_hash()` panics at 5767 (it also could not
+  hash a 16 KiB unit from one 4 KiB page).
+- **Fix `0152-sweet-skip-oversized-hash-page-validation.patch`:** in
+  `cs_validate_hash()`, under `SANTONI||OXYGEN`, when the covering blob's
+  `csb_hash_pageshift > PAGE_SHIFT`, report the whole unit as processed
+  (`bytes_processed = 1U << csb_hash_pageshift`), `*tainted = 0`, and return
+  TRUE without hashing. `cs_validate_page()` then marks the page
+  `VMP_CS_ALL_TRUE` (`bytes_processed > PAGE_SIZE - FOURK_PAGE_SIZE`), and
+  `cs_validate_range()` (the chunked path) also accepts it. Normal blobs
+  (`hash_pageshift == PAGE_SHIFT`) keep the existing hashing path unchanged.
+  Generated against the exact post-`0151` CI source; `git apply --check` and
+  `patch --fuzz=0` both clean; result byte-identical to the local file.
+- **Next:** CI build `0152`, verify the uploaded buildtree contains the
+  `csb_hash_pageshift > PAGE_SHIFT` branch, rebuild
+  `shim-boot-realroot.img`, `fastboot boot` (userdata unchanged).
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 
