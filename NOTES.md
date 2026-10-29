@@ -269,6 +269,42 @@
   image is read-only-verified only, and its ownership caveat is recorded
   above.
 
+## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
+
+- **Progress (fixed image `1ad47704…`, `sweetlog=0` variant):** the
+  `__memmove_chk subrs.c:725` panic is GONE. The kernel mounts the HFS+ root,
+  execs Apple `/sbin/launchd`, dyld runs, and panics at the NEXT wall:
+  `SWEET EARLY PANIC: initproc failed to start -- exit reason namespace 6
+  subcode 0x1 description: Library not loaded: /usr/lib/libSystem.B.dylib
+  Referenced from: <5C15DB07-...> /sbin/launchd`. This is the same dyld-cache
+  wall santoni solved (iOS has no standalone libSystem.B.dylib; it lives only
+  inside dyld_shared_cache_arm64).
+- **What is NOT the cause (all verified):** the 44 cache files ARE on the image
+  at `/System/Library/Caches/com.apple.dyld/` (`qemu-verify-root.log`, link
+  count 2 = OS-root hard link + cryptex path). `/chosen/asmb` exists with
+  `lp-sip0=0x6f`/`lp-sip1=1` (SIP relaxed). Cmdline has `ignition_level=1`,
+  `unentitled_ios_sim_launch=1`, `launchd_unsecure_cache=1`. Patch `0144` (4K
+  unsigned cache) and the `0149` finderinfo fix are in the running kernel.
+- **On santoni, `ignition_level=1` made libignition's `dyld_cache` stage print**
+  `dylib_cache: finding shared cache on system volume: ... subpath =
+  System/Library/Caches/com.apple.dyld/` and find it (boot 0032r -> launchd
+  ran). Oxygen's panic means the cache dir was not located/mapped. NEED the
+  kernel console lines just above the panic (any `libignition`, `dylib_cache`,
+  `finding shared cache`, `search root fd`, `subpath`, `ignition boot failed`,
+  `fsck`, `hfs:`) to split "wrong path" (image) vs "map refused" (kernel).
+- **Diagnostic image ready (captures the lines without transcribing):**
+  `/home/moron/ios/oxygen-0148/shim-boot-realroot-sweetlog.img` (SHA-256
+  `794be6ec…`), same payload + `sweetlog=1`. It writes the console ring to the
+  `system` partition's first 8193 sectors (the 0143 fence keeps it off
+  `userdata`); pull it via recovery + `tools/sweet-log-pull.sh`. `userdata`/
+  bootloaders untouched; `system` head is the only write (Android's system is
+  disposable). `payload-realroot-sweetlog.bin` SHA-256 `fae35435…`.
+- **Two ways forward:** (a) read the ~15 lines above the panic off the screen
+  and report them (fastest, zero writes); or (b) `fastboot boot
+  shim-boot-realroot-sweetlog.img`, then re-enter fastboot -> OrangeFox ->
+  `sweet-log-pull.sh` to fetch the full ring. Either gives the libignition
+  subpath/failure that decides the fix. No `userdata` reflash needed.
+
 ## oxygen (2026-10-29, active): real-root boot panic fixed - sweet_hfs finderinfo overflow
 
 - **What happened:** the user confirmed the destructive `userdata` write
