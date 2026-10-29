@@ -185,13 +185,35 @@
   `tests/run_tests.sh` adds **OXY-05** for the patch structure and the
   late-registration call. `HOST_CC=gcc bash tests/run_tests.sh` passes all
   host tests, patch checks and assertions. Code commit `2def6d3`.
+- **0148 CI and repack (2026-10-29):** run `40852050083`
+  (`benjamin7150/ios-oxygen`, `ci-x64`, head `a4a61ff`,
+  `macos-15-intel`, Xcode 16, `OXYGEN`, DEVELOPMENT) succeeded at
+  `10:01:21Z`. `check_patch.log` lists 0148, the build log contains
+  `Applying patch: .../0148-sweet-hfs-sysctl-macros.patch`, and the
+  packaged source has the macro override. The old
+  `hfs_vfsutils.c:3871` cast to `sysctl_register_oid_early` warning is
+  gone. Kernel:
+  `/home/moron/ios/oxygen-0148/kernel.development.oxygen`
+  (17,296,576 B, sha256
+  `39ae617c7014c9436802fb16c5d5ff3cbd7667dddbd97b7f55f4050ab181f42f`).
+  Repacked from the preserved 0147 shim/init/ADT (hashes above) and the
+  oxygen DTB. New payload
+  `/home/moron/ios/oxygen-0148/payload.bin` (16,721,232 B, sha256
+  `18a54527d7b79a12e6d23a26f959df99f1ed384d3885bd00b147ecc7da3a45fa`);
+  boot image `/home/moron/ios/oxygen-0148/shim-boot.img` (17,174,528 B,
+  sha256 `a98e512c6a90a4e85c9fc578feb5dc10cb15f5c19f6bd6fba87c07734193952f`).
+  Verified: kernel section is the 180,224 B shim followed by the 270,247 B
+  DTB exactly once; payload has 11 segments, the preserved ADT random seed,
+  and `init.macho` exactly once; the Android header cmdline matches the
+  tested string. No device commands run; no partitions written.
 - **Open items:**
-  1. Rebuild with 0148 (CI pending), then repack from
-     `/home/moron/ios/oxygen-0147/shim-base.img` and
-     `/home/moron/ios/oxygen-0147/init.macho`, appending the oxygen DTB
-     exactly once. Boot non-destructively and record `BOOT_CPU`, the loader
-     output, whether `SWEET HFS: hfs-627.100.6 registered` appears, and any
-     next panic. The stale 0147 image is RAM-only and must not be reused.
+  1. The 0148 image is ready for the next RAM-only boot. The phone is
+     still on the old panic screen; power-cycle it, then the user runs:
+     `adb reboot bootloader` (or Power+Volume Down), `fastboot devices`,
+     `fastboot boot /home/moron/ios/oxygen-0148/shim-boot.img`.
+     Record `BOOT_CPU`, the loader output,
+     `SWEET HFS: hfs-627.100.6 registered`, and any next panic. Do not
+     flash any partition.
   2. Display identity: the real iPhone 8 Plus UI is 414x736 pt @3x
      (1242x2208 canvas) while our native canvas is 1080x1920 @3x
      (360x640 pt, not a real screen size; UIKit's "No status bar visual
@@ -207,19 +229,20 @@
   geometry) on `santoni`; `f5c9054` (x64 runner + 0146), `8edb0bb`
   (OXYGEN staging), `ffd7c7b` (OXYGEN gates + HFS compat), `4513296`
   (x64 build/payload notes), `dee3a3f` (shim boot CPU), `e806564`
-  (0147 oxygen boot core), `e5ee65b` (rewritten-commit handoff), and
-  `2def6d3` (0148 HFS sysctl fix) on `ci-x64`. All fork-local commits
-  since `e0ac369` are under author/committer `benjamin7150`; both branches
-  are force-pushed to `fork`.
-- **Next concrete action:** push `2def6d3`, start the x64 CI build with
-  `macos_version=13.5`, `kernel_config=DEVELOPMENT`, `machine_config=OXYGEN`
-  and `runner=macos-15-intel`, then download and verify the new kernel.
-  Repack with the preserved shim/init above and boot it. The device is
-  currently sitting on the `kern_newsysctl.c:254` panic screen;
-  power-cycle/reboot it before the next `adb reboot bootloader`. `fastboot`
-  must use the host path; `/storage/emulated/0/shim-boot.img` is only a
-  backup. Record the HFS registration line and the next displayed output,
-  and update this section.
+  (0147 oxygen boot core), `e5ee65b` (rewritten-commit handoff),
+  `2def6d3` (0148 HFS sysctl fix), and `a4a61ff` (0148 handoff) on
+  `ci-x64`. All fork-local commits since `e0ac369` are under
+  author/committer `benjamin7150`; both branches are force-pushed to
+  `fork`.
+- **Next concrete action:** the 0148 image is built and verified; boot it
+  RAM-only. The device is currently sitting on the `kern_newsysctl.c:254`
+  panic screen, so power-cycle it first (or hold Power+Volume Down for
+  fastboot), then run `adb reboot bootloader`, `fastboot devices`, and
+  `fastboot boot /home/moron/ios/oxygen-0148/shim-boot.img`. Do not flash
+  any partition; `/storage/emulated/0/shim-boot.img` is only a backup.
+  Record the HFS registration line and the next displayed output, and
+  update this section. The HFS fix is CI-verified but not yet
+  boot-confirmed.
 
 ## dff9f18 (2026-10-22): fix EL1 permission fault on `/dev/remmcroot0` reads
 
