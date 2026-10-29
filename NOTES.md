@@ -399,10 +399,26 @@
   struct is unchanged. `uintptr_t` is already used in this file. Generated
   against the exact post-`0153` CI source; `git apply --check` and
   `patch --fuzz=0` both clean; result byte-identical to the local file.
-- **Next:** CI build `0154`, verify the uploaded buildtree `hfs_xattr.c`
-  matches and the disassembly has no `chk_size=2` `__memmove_chk` call in
-  `_hfs_setxattr_internal`, rebuild `shim-boot-realroot.img`, `fastboot boot`
-  (userdata unchanged).
+- **CI build `40964144593` (headSha `4378284`) SUCCESS, verified:** buildtree
+  `hfs_xattr.c` is byte-identical to the patched file, so dxb applied `0154`.
+  Kernel `4878a160…` (SHA256SUMS OK). In the new disassembly the same call now
+  passes a dynamic check size (`x3 = recp_size - 0x10`, i.e. the rounded
+  `attrsize`) instead of the constant `2`, so the fortify check is satisfied;
+  no `mov w3, #2` remains in `_hfs_setxattr_internal`. Rebuilt
+  `payload-realroot.bin` `499e8f70…` and `shim-boot-realroot.img` `ee080651…`
+  (kernel half 450471 B, payload 16707168 B, cmdline unchanged).
+- **Image-side note:** the actual root image is fine: `7z` listing shows
+  `/private/var/keybags/systembag.kb` (227 B) and
+  `/private/var/containers/{Bundle,Data/System,Shared/SystemGroup,Temp}`,
+  created by `oxygen-root/qemu/init`. (The earlier "missing" observation was
+  about the OS staging tree, not the built image.) No reflash is needed for
+  these; any future partition write still needs fresh confirmation.
+- **Next:** `fastboot boot /home/moron/ios/oxygen-0148/shim-boot-realroot.img`
+  (userdata unchanged). Expect the xattr panic to be gone and boot tasks to
+  continue. The daemon crashes seen before the panic (fseventsd SIGBUS,
+  locationd "file does not start with MH_MAGIC_64", rapportd text-page
+  corruption) are not yet diagnosed; if they persist, capture them and check
+  whether they are cache/hard-link related before touching userdata.
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 
