@@ -215,22 +215,22 @@
   launchd; the `SANTONI` label is hard-coded in that test program. The
   result proves the kernel passed the HFS permanent-sysctl panic and
   reached userspace PID 1, so the 0148 fix is now boot-confirmed. The user
-  reports that the test init's `/dev/remmcroot0` eMMC read works, but did
-  not provide the exact LBA-0 bytes; the five-second
-  `SANTONI init: still alive (tick)` heartbeat and the
-  `SWEET HFS: hfs-627.100.6 registered` line were not captured. The banner
-  itself is functional proof that HFS's late sysctl registration did not
-  panic. The eMMC read confirms the SDHCI/userspace read path on oxygen; it
-  is not an HFS-root mount. Do not call this a full iOS userspace boot yet.
+  reports that the test init's `/dev/remmcroot0` eMMC read works and the
+  five-second `SANTONI init: still alive (tick)` heartbeat repeats. The
+  exact LBA-0 bytes and the `SWEET HFS: hfs-627.100.6 registered` line were
+  not captured; the HFS line is optional because reaching PID 1 already
+  proves the late registration did not panic. The eMMC read confirms the
+  SDHCI/userspace read path on oxygen; it is not an HFS-root mount. This
+  completes the test-init path, but is not a full iOS userspace boot.
 - **Open items:**
-  1. **0148 test-init path:** the `/dev/remmcroot0` read is confirmed;
-     capture the heartbeat and, if convenient, the exact LBA-0 bytes. The
-     HFS registration line is optional — reaching PID 1 already proves the
-     HFS panic is gone. If the heartbeat is stable, the test-init path is
-     complete and the next milestone is real iOS userland (replace the
-     static init with the donor launchd/HFS root path), not another
-     test-init boot. No real iOS root image is staged under `/home/moron/ios`
-     yet. Do not flash any partition.
+  1. **0148 test-init path: COMPLETE.** PID 1, `/dev/console`, the
+     five-second timer and a raw `/dev/remmcroot0` LBA-0 read are all
+     confirmed on hardware. The next milestone is a real iOS 16 root image
+     (D21AP / 20H392 HFS root plus launchd/dyld cache), not another
+     test-init boot. This host currently has only the extracted D21AP ADT
+     under `research/ipsw-8plus`; the donor root/cryptex DMGs and
+     `apfs-fuse` are not present. Do not flash any partition until the root
+     image is built or imported and the destructive step is confirmed.
   2. Display identity: the real iPhone 8 Plus UI is 414x736 pt @3x
      (1242x2208 canvas) while our native canvas is 1080x1920 @3x
      (360x640 pt, not a real screen size; UIKit's "No status bar visual
@@ -251,13 +251,16 @@
   `ci-x64`. All fork-local commits since `e0ac369` are under
   author/committer `benjamin7150`; both branches are force-pushed to
   `fork`.
-- **Next concrete action:** the 0148 image is booted, the static test init
-  ran, and the eMMC LBA-0 read succeeded. Leave it running long enough to
-  confirm the five-second heartbeat. After that, the next milestone is a
-  real iOS 16 root: build or import the D21AP/20H392 HFS root image, use
-  the existing `userdata` plan, and boot it RAM-only first. Keep bootloader,
-  recovery, modem, persist and backups untouched. The HFS sysctl fix and the
-  test-init path are boot-confirmed; full iOS userspace is not.
+- **Next concrete action:** the test-init path is complete; no further
+  test-init boot is needed. The next milestone is a real iOS 16 root: build
+  or import the D21AP/20H392 HFS root image. This host currently lacks the
+  donor OS/SystemOS/AppOS DMGs and `apfs-fuse`, so first mount/copy the
+  donor assets or download the iPhone 8 Plus IPSW, then run
+  `tools/mkiosroot.sh`. Flash it into the existing `userdata` only after the
+  image is built and verified, and ask for explicit confirmation immediately
+  before that destructive step; no GPT changes. Keep bootloader, recovery,
+  modem, persist and backups untouched. The HFS sysctl fix and test-init
+  path are boot-confirmed; full iOS userspace is not.
 
 ## dff9f18 (2026-10-22): fix EL1 permission fault on `/dev/remmcroot0` reads
 
