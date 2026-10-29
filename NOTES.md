@@ -83,12 +83,12 @@
   Run `40778852248` (`macos-15-intel`, Xcode 16) failed after 14m15s because
   0019/0020/0026 exited early for `MACHINE_CONFIG=OXYGEN`, so
   `sweet_bearssl`, `sweet_libpthread` and HFS sources were missing. Fixed
-  in `76a66ec`; run `40781407165` then failed after 25m19s because the
-  0019/0020 Makefile gates still filtered only `SWEET SANTONI`, so the
-  OXYGEN compile omitted `TargetConditionals.h`, BearSSL `inner.h`, and the
-  HFS compat/include paths. Fixed in `bf8d73c` by adding `OXYGEN` to both
-  gates and teaching the HFS compat header the private `struct vnode` and
-  `sysctlbyname` KPI. Run `40786025333` (`macos-15-intel`, Xcode 16,
+  in `8edb0bb` (pre-rewrite `76a66ec`); run `40781407165` then failed after
+  25m19s because the 0019/0020 Makefile gates still filtered only
+  `SWEET SANTONI`, so the OXYGEN compile omitted `TargetConditionals.h`,
+  BearSSL `inner.h`, and the HFS compat/include paths. Fixed in `ffd7c7b`
+  (pre-rewrite `bf8d73c`) by adding `OXYGEN` to both gates and teaching the
+  HFS compat header the private `struct vnode` and `sysctlbyname` KPI. Run `40786025333` (`macos-15-intel`, Xcode 16,
   `OXYGEN`, DEVELOPMENT) succeeded in 21m13s; its `xnu-kernel` artifact
   contains `kernel.development.oxygen` (17,297,400 B, Mach-O arm64, sha256
   `c95614cfb33fe273ae00621c49822b51abcf380dbd98bccfb48a0ad40fb47c05`)
@@ -162,11 +162,14 @@
      type's fixed bounds. Record the observed result after the first boot.
   3. Android data and all partitions are untouched (the persistent console
      log stays off unless `sweetlog=1`).
-- **Commits:** `4843f14` (board target), `e20be29` (D21AP HomeButtonType),
-  `2c2efbb`/`005927c` (BGR24 early console and hardware-confirmed shim
-  geometry) on `santoni`; `1e2df98` (x64 runner + 0146), `76a66ec`
-  (OXYGEN staging) and `bf8d73c` (OXYGEN gates + HFS compat) on `ci-x64`.
-  Both branches are pushed to `fork`.
+- **Commits:** `fb04500` (board target), `cdea82e` (D21AP HomeButtonType),
+  `11a719f`/`8805e86` (BGR24 early console and hardware-confirmed shim
+  geometry) on `santoni`; `f5c9054` (x64 runner + 0146), `8edb0bb`
+  (OXYGEN staging), `ffd7c7b` (OXYGEN gates + HFS compat), `4513296`
+  (x64 build/payload notes), `dee3a3f` (shim boot CPU), and `e806564`
+  (0147 oxygen boot core) on `ci-x64`. All 11 fork-local commits since
+  `e0ac369` were rewritten to author/committer `benjamin7150`; both
+  branches are force-pushed to `fork`.
 - **Next concrete action:** push 0147, start the x64 CI build, download the
   new oxygen kernel, repack with the shim base
   `/tmp/opencode/shim-final/shim-base.img`, stage it and boot it. The
