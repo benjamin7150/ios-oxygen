@@ -269,41 +269,48 @@
   image is read-only-verified only, and its ownership caveat is recorded
   above.
 
-## oxygen (2026-10-29, active): real-root reaches launchd - dyld cache map refused, FIXED by 0150
+## oxygen (2026-10-29, active): real-root dyld cache wall = dyld4 F_ADDFILESIGS_RETURN end_offset 0 -> FIXED by 0151
 
-- **Photo `IMG_20261029_144952.jpg` decoded the wall.** libignition ran fine:
-  `platform 0x2`, `stage count 0x7`, `preboot`/`cryptex1 sniff` skipped
-  (`ignition level 1 < required 2`, expected), then `dylib_cache: opened shared
-  cache directory: /System/Library/Caches/com.apple.dyld` → `ignition sequence
-  complete`. The cache dir is FOUND. The failure is after: dyld calls
-  `shared_region_check_np`/`vm_shared_region_start_address` → kernel prints
+- **Photo `IMG_20261029_144952.jpg` decoded the wall.** libignition ran fine
+  (`platform 0x2`, `stage count 0x7`, preboot/cryptex stages skipped at
+  `ignition_level=1`), then `dylib_cache: opened shared cache directory:
+  /System/Library/Caches/com.apple.dyld` -> `ignition sequence complete`. The
+  cache dir is FOUND. The failure is after: dyld prints
   `dyld cache '(null)' not loaded: code signature does not cover entire shared
-  cache file` → `Library not loaded: /usr/lib/libSystem.B.dylib` → initproc
+  cache file` -> `Library not loaded: /usr/lib/libSystem.B.dylib` -> initproc
   panic.
-- **Root cause (the gap in `0144`/`0145`).** `0144` detaches the cs_blob of the
-  16 KiB-signed (`cd->pageSize==14`) cache and boots it unsigned — so the vnode
-  carries NO `cs_blob`. But `shared_region_map_and_slide_2_np` (bsd/vm/vm_unix.c
-  ~2651) still runs `ubc_cs_is_range_codesigned` on every non-ZF mapping under
-  `cs_system_enforcement()` (default ON for DEVELOPMENT). With no blob,
-  `ubc_cs_blob_get` returns NULL → FALSE → EINVAL. `0144` never touched that
-  coverage loop, so the unsigned cache could never map with enforcement on.
-- **Fix `0150-sweet-unsigned-dyld-cache-map.patch`** (committed this rev): in
-  `ubc_cs_is_range_codesigned` (bsd/kern/ubc_subr.c), under
-  `SANTONI||OXYGEN`, if `ubc_get_cs_blobs(vp)==NULL` (the `0144`-detached
-  unsigned cache) return TRUE — a blob-less vnode has nothing to range-check.
-  A vnode that DOES carry a blob must still fully cover the range. Verified:
-  `git apply` clean on pristine `ubc_subr.c`, produces intended file.
-- **Build/boot:** added `cs_enforcement_disable=1` to `realroot-cmdline.txt` and rebuilt `shim-boot-realroot.img` (`61228711…`). This disables `cs_system_enforcement()` globally on the DEVELOPMENT kernel, bypassing the `vm_unix.c` coverage checks and trust-cache/signing gates that were rejecting the unsigned 16 KiB dyld cache (`code signature does not cover entire shared cache file`). **Boot:** `fastboot boot oxygen-0148/shim-boot-realroot.img`.
-  `40880584113` (macos-15-intel, headSha `e061a05`) produced
-  `kernel.development.oxygen` SHA-256 `5fdea4238b4d1eecb1fae3a7f36e69da676f7120835f698a54e9565f367b9ddd`
-  (matches SHA256SUMS; differs from 0149 `e4799dde…`). Rebuilt:
-  `payload-realroot.bin` `d7cbefd4…`, `shim-boot-realroot.img` `d3ac92b8…`
-  (kernel half `450471B` reused verbatim, ramdisk `16704512B`, cmdline+ADT
-  preserved). **Boot:** `fastboot boot oxygen-0148/shim-boot-realroot.img`.
-  Watch for whether the dyld cache now maps (no more `does not cover entire
-  shared cache file`) and launchd proceeds past libSystem. The `sweetlog`
-  diagnostic image (`794be6ec…`) is no longer needed now that the photo gave
-  the answer.
+- **Second photo `IMG_20261029_173208.jpg` (boot of 0150 + `cs_enforcement_disable=1`
+  image `61228711…`) is byte-for-byte the same failure** - so neither `0150`
+  (coverage loop) nor `cs_enforcement_disable` was the binding gate.
+- **Actual root cause (dyld-side, not the kernel coverage loop).** That string
+  lives in dyld (`preflightCacheFile`), not XNU: dyld calls
+  `fcntl(fd, 97 /*F_ADDFILESIGS_RETURN*/, &fsignatures)`, and the kernel handler
+  (bsd/kern/kern_descrip.c) copies out `end_offset = blob->csb_end_offset`. With
+  `0144`'s early `return 0` in `ubc_cs_blob_add()` the blob is detached, so
+  `blob == NULL`, `end_offset = 0` is copied out, and dyld's `0 < expected`
+  compare fails. `cs_enforcement_disable` cannot affect this path.
+- **`0144` also leaked**: `cs_blob_init_validated()` had already consumed the
+  kernel blob allocation and parsed the CodeDirectory (`csb_end_offset =
+  codeLimit` rounded up) - the early return threw that away. Nothing inside
+  `ubc_cs_blob_add()` hashes pages (`cs_validate_hash` only runs at
+  page-validation sites, which the disabled sub-map enforcement bypasses).
+- **Fix `0151-sweet-attach-oversized-cache-blob.patch`:** in `ubc_cs_blob_add`,
+  under `SANTONI||OXYGEN`, when `cd->pageSize > PAGE_SHIFT` do NOT detach;
+  keep the normal attach path and only skip the `mac_vnode_check_signature`
+  MACF/AMFI hook (same "boot the cache as unsigned" intent as `0144`). The
+  attached blob carries `csb_end_offset = codeLimit`, so F_ADDFILESIGS_RETURN
+  reports real coverage and the vm_unix map gates see a blob+cdhash.
+  Verified with strict `patch -p1`: base -> 0150 -> 0151 reproduces the
+  buildtree file exactly (3 hunks; `git apply` in a fresh no-HEAD test repo was
+  unreliable due to strip-level guessing, so use `patch(1)` for validation).
+- **`0150` stays** (blob-less ranges treated as covered; harmless now that the
+  blob is attached). `cs_enforcement_disable=1` also stays in the cmdline for
+  the bring-up.
+- **Next:** CI build of `0151`, download `kernel.development.oxygen`, run
+  `oxygen-0148/rebuild-realroot.sh`, `fastboot boot`. `userdata` needs no
+  reflash (kernel-only fix). Expect the cache to map and libSystem to load.
+  CI run `40880584113` (headSha `e061a05`) had produced `0150` kernel
+  `5fdea423…`; image `61228711…` is that kernel + the bootarg.
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 

@@ -1,0 +1,47 @@
+diff --git a/bsd/kern/ubc_subr.c b/bsd/kern/ubc_subr.c
+--- a/bsd/kern/ubc_subr.c
++++ b/bsd/kern/ubc_subr.c
+@@ -4648,13 +4648,16 @@
+ 
+ #if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)
+ 	/*
+-	 * pageSize 14 means 16 KiB hash units on 4 KiB pages: cs_validate_hash()
+-	 * would hash a whole 16 KiB unit out of a single mapped 4 KiB page and
+-	 * fault. Keep the blob detached and boot the cache as unsigned.
++	 * pageSize 14 means 16 KiB hash units on 4 KiB pages: page validation
++	 * (cs_validate_hash()) would hash a whole 16 KiB unit out of a single
++	 * mapped 4 KiB page and fault. This function never hashes pages, and
++	 * cs_blob_init_validated() above already parsed the CodeDirectory and
++	 * computed csb_end_offset from codeLimit. Dropping the parse here made
++	 * F_ADDFILESIGS_RETURN report end_offset = 0, so dyld rejected the
++	 * cache as "code signature does not cover entire shared cache file".
++	 * Keep the parse and attach it; only skip the MACF policy hook below.
+ 	 */
+-	if (cd != NULL && cd->pageSize > PAGE_SHIFT) {
+-		return 0;
+-	}
++	boolean_t sweet_skip_macf = (cd != NULL && cd->pageSize > PAGE_SHIFT);
+ #endif
+ 	tmp_blob.csb_cpu_type = cputype;
+ 	tmp_blob.csb_cpu_subtype = cpusubtype & ~CPU_SUBTYPE_MASK;
+@@ -4721,6 +4724,9 @@
+ 	unsigned int cs_flags = tmp_blob.csb_flags;
+ 	unsigned int signer_type = tmp_blob.csb_signer_type;
+ 
++#if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)
++	if (!sweet_skip_macf) {
++#endif
+ 	error = mac_vnode_check_signature(
+ 		vp,
+ 		&tmp_blob,
+@@ -4730,6 +4736,10 @@
+ 		flags,
+ 		platform);
+ 
++#if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)
++	}
++#endif
++
+ 	if (error != 0) {
+ 		printf("validation of code signature failed through MACF policy: %d\n", error);
+ 		goto out;
