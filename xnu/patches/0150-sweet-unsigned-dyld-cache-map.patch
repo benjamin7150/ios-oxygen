@@ -1,0 +1,22 @@
+diff --git a/bsd/kern/ubc_subr.c b/bsd/kern/ubc_subr.c
+--- a/bsd/kern/ubc_subr.c
++++ b/bsd/kern/ubc_subr.c
+@@ -6065,6 +6065,18 @@
+ 		return FALSE;
+ 	}
+ 
++#if defined(ARM64_BOARD_CONFIG_SANTONI) || defined(ARM64_BOARD_CONFIG_OXYGEN)
++	/*
++	 * ubc_cs_blob_add() detaches the cs_blob of a shared cache signed with
++	 * hash units larger than one page (16 KiB units on 4 KiB pages) and boots
++	 * it unsigned. Such a vnode has no blob at all, so there is no range to
++	 * check it against: treat it as covered instead of failing every mapping.
++	 * A vnode that does carry a blob must still fully cover the range.
++	 */
++	if (ubc_get_cs_blobs(vp) == NULL) {
++		return TRUE;
++	}
++#endif
+ 	csblob = ubc_cs_blob_get(vp, -1, -1, start);
+ 	if (csblob == NULL) {
+ 		return FALSE;

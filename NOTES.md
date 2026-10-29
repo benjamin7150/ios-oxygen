@@ -269,6 +269,36 @@
   image is read-only-verified only, and its ownership caveat is recorded
   above.
 
+## oxygen (2026-10-29, active): real-root reaches launchd - dyld cache map refused, FIXED by 0150
+
+- **Photo `IMG_20261029_144952.jpg` decoded the wall.** libignition ran fine:
+  `platform 0x2`, `stage count 0x7`, `preboot`/`cryptex1 sniff` skipped
+  (`ignition level 1 < required 2`, expected), then `dylib_cache: opened shared
+  cache directory: /System/Library/Caches/com.apple.dyld` → `ignition sequence
+  complete`. The cache dir is FOUND. The failure is after: dyld calls
+  `shared_region_check_np`/`vm_shared_region_start_address` → kernel prints
+  `dyld cache '(null)' not loaded: code signature does not cover entire shared
+  cache file` → `Library not loaded: /usr/lib/libSystem.B.dylib` → initproc
+  panic.
+- **Root cause (the gap in `0144`/`0145`).** `0144` detaches the cs_blob of the
+  16 KiB-signed (`cd->pageSize==14`) cache and boots it unsigned — so the vnode
+  carries NO `cs_blob`. But `shared_region_map_and_slide_2_np` (bsd/vm/vm_unix.c
+  ~2651) still runs `ubc_cs_is_range_codesigned` on every non-ZF mapping under
+  `cs_system_enforcement()` (default ON for DEVELOPMENT). With no blob,
+  `ubc_cs_blob_get` returns NULL → FALSE → EINVAL. `0144` never touched that
+  coverage loop, so the unsigned cache could never map with enforcement on.
+- **Fix `0150-sweet-unsigned-dyld-cache-map.patch`** (committed this rev): in
+  `ubc_cs_is_range_codesigned` (bsd/kern/ubc_subr.c), under
+  `SANTONI||OXYGEN`, if `ubc_get_cs_blobs(vp)==NULL` (the `0144`-detached
+  unsigned cache) return TRUE — a blob-less vnode has nothing to range-check.
+  A vnode that DOES carry a blob must still fully cover the range. Verified:
+  `git apply` clean on pristine `ubc_subr.c`, produces intended file.
+- **Build/boot:** kernel-only fix — `userdata` needs NO reflash. Rebuild via
+  CI (`xnu.yml`, `macos-15-intel`), drop `kernel.development.oxygen` into
+  `oxygen-0148/`, `./rebuild-realroot.sh`, `fastboot boot`. The `sweetlog`
+  diagnostic image (`794be6ec…`) is no longer needed now that the photo gave
+  the answer.
+
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 
 - **Progress (fixed image `1ad47704…`, `sweetlog=0` variant):** the
