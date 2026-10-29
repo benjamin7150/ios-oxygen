@@ -143,15 +143,55 @@
   This confirms oxygen's ABL starts XNU on cluster 0/core 0 (`MPIDR 0x0`),
   while `0082-topaz-boot-on-gold-cpu.patch` hard-coded the santoni/topaz
   gold core `0x100`. No partitions were written.
-- **Kernel fix (pending CI):** `0147-oxygen-sweet-boot-cpu.patch` selects
-  `expected_boot_phys = 0x0` when `ARM64_BOARD_CONFIG_OXYGEN` is defined and
-  leaves `0x100` for santoni/sweet. `tests/run_tests.sh` adds **OXY-04** for
-  the boot-core selection; all host tests and patch checks pass. A new x64
-  kernel artifact is required before the next payload can be packed.
+- **0147 CI and third boot (2026-10-29):** `0147-oxygen-sweet-boot-cpu.patch`
+  selects `expected_boot_phys = 0x0` for `ARM64_BOARD_CONFIG_OXYGEN`;
+  `tests/run_tests.sh` adds **OXY-04**. Run `40791027939`
+  (`macos-15-intel`, Xcode 16, `OXYGEN`, DEVELOPMENT) succeeded and its
+  kernel is preserved at
+  `/home/moron/ios/oxygen-0147/kernel.development.oxygen`
+  (17,297,400 B, sha256
+  `0742cbae72850de29e1c2c0f2930fc68abf602f4b3f1966f104ddf2404d2d5f4`).
+  The image was repacked from the true shim base
+  `/home/moron/ios/oxygen-0147/shim-base.img` (180,224 B, sha256
+  `c0ffd2ad5a60dd4decfa34036ddc99c345689003a659bd1a33f5f34e724192ec`) and
+  `/home/moron/ios/oxygen-0147/init.macho` (16,635 B, sha256
+  `7cb8078d7212c35f556c350a04219cf990032dea645d546f7a3c3b910555301c`),
+  with the oxygen DTB appended exactly once. The boot image is
+  `/home/moron/ios/oxygen-0147/shim-boot.img` (17,176,576 B, sha256
+  `17c10b175b1d9a2d12d9392b9f4d38d82ec66309006ee5e2f511b04de36d5906`).
+  It passed `SweetCPU.cpp:153` and reached a new panic:
+  ```
+  SWEET EARLY PANIC: Use sysctl_register_old_early to register permanent
+  nodes @ kern_newsysctl.c:254
+  ```
+  The displayed call name says `old_early`; the source guard is
+  `sysctl_register_oid_early` in `kern_newsysctl.c`.
+- **New panic root cause (HFS):** built-in HFS is compiled with
+  `-include bsd/sweet_hfs/sweet_hfs_compat.h`. That header includes
+  `<sys/vnode_internal.h>` before it undefines `XNU_KERNEL_PRIVATE`;
+  `vnode_internal.h` includes `<sys/sysctl.h>`, whose include guard pins the
+  private `SYSCTL_OID`/`SYSCTL_NODE` macros. HFS's `SYSCTL_*` OIDs therefore
+  carry `CTLFLAG_PERMANENT` and an automatic `__STARTUP_ARG` registration.
+  `hfs_sysctl_register()` (called by `sweet_hfs_register()` at
+  `bsd_init.c:703`) still calls `sysctl_register_oid()` late, which panics on
+  the permanent node. The CI log at `hfs_vfsutils.c:3871` shows the
+  auto-generated cast to `sysctl_register_oid_early`, confirming this path.
+  `sweet_pthread_compat.h` does not include `vnode_internal.h`, so its
+  `SYSCTL_INT` already uses the public form; no pthread change is needed.
+- **Fix staged (0148):** `0148-sweet-hfs-sysctl-macros.patch` overrides
+  `SYSCTL_OID` and `SYSCTL_NODE` with the public (kext) forms after the
+  private headers are included. HFS keeps `hfs_sysctl_register()` but its
+  OIDs are no longer permanent and have no automatic early registration.
+  `tests/run_tests.sh` adds **OXY-05** for the patch structure and the
+  late-registration call. `HOST_CC=gcc bash tests/run_tests.sh` passes all
+  host tests, patch checks and assertions. Code commit `2def6d3`.
 - **Open items:**
-  1. Rebuild the kernel with 0147, repack the oxygen payload, stage it and
-     boot again. Record `BOOT_CPU`, the loader output and whether the
-     kernel/HFS/PID 1 path gets past `SweetCPU.cpp:153`.
+  1. Rebuild with 0148 (CI pending), then repack from
+     `/home/moron/ios/oxygen-0147/shim-base.img` and
+     `/home/moron/ios/oxygen-0147/init.macho`, appending the oxygen DTB
+     exactly once. Boot non-destructively and record `BOOT_CPU`, the loader
+     output, whether `SWEET HFS: hfs-627.100.6 registered` appears, and any
+     next panic. The stale 0147 image is RAM-only and must not be reused.
   2. Display identity: the real iPhone 8 Plus UI is 414x736 pt @3x
      (1242x2208 canvas) while our native canvas is 1080x1920 @3x
      (360x640 pt, not a real screen size; UIKit's "No status bar visual
@@ -159,25 +199,27 @@
      hard-coded to the iPhone X 1125x2436 canvas. Expected fix later: present
      the D21AP 1242x2208 logical canvas and downscale (MDP or CPU) to the
      1080x1920 panel, or verify that the 8 Plus frameworks use the product
-     type's fixed bounds. Record the observed result after the first boot.
+     type's fixed bounds. Record the observed result after the next boot.
   3. Android data and all partitions are untouched (the persistent console
      log stays off unless `sweetlog=1`).
 - **Commits:** `fb04500` (board target), `cdea82e` (D21AP HomeButtonType),
   `11a719f`/`8805e86` (BGR24 early console and hardware-confirmed shim
   geometry) on `santoni`; `f5c9054` (x64 runner + 0146), `8edb0bb`
   (OXYGEN staging), `ffd7c7b` (OXYGEN gates + HFS compat), `4513296`
-  (x64 build/payload notes), `dee3a3f` (shim boot CPU), and `e806564`
-  (0147 oxygen boot core) on `ci-x64`. All 11 fork-local commits since
-  `e0ac369` were rewritten to author/committer `benjamin7150`; both
-  branches are force-pushed to `fork`.
-- **Next concrete action:** push 0147, start the x64 CI build, download the
-  new oxygen kernel, repack with the shim base
-  `/tmp/opencode/shim-final/shim-base.img`, stage it and boot it. The
-  device is currently sitting on the `SweetCPU.cpp:153` panic screen;
+  (x64 build/payload notes), `dee3a3f` (shim boot CPU), `e806564`
+  (0147 oxygen boot core), `e5ee65b` (rewritten-commit handoff), and
+  `2def6d3` (0148 HFS sysctl fix) on `ci-x64`. All fork-local commits
+  since `e0ac369` are under author/committer `benjamin7150`; both branches
+  are force-pushed to `fork`.
+- **Next concrete action:** push `2def6d3`, start the x64 CI build with
+  `macos_version=13.5`, `kernel_config=DEVELOPMENT`, `machine_config=OXYGEN`
+  and `runner=macos-15-intel`, then download and verify the new kernel.
+  Repack with the preserved shim/init above and boot it. The device is
+  currently sitting on the `kern_newsysctl.c:254` panic screen;
   power-cycle/reboot it before the next `adb reboot bootloader`. `fastboot`
   must use the host path; `/storage/emulated/0/shim-boot.img` is only a
-  backup. Record `BOOT_CPU`, the displayed loader/panic output and update
-  this section.
+  backup. Record the HFS registration line and the next displayed output,
+  and update this section.
 
 ## dff9f18 (2026-10-22): fix EL1 permission fault on `/dev/remmcroot0` reads
 
