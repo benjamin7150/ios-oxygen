@@ -1,0 +1,19 @@
+diff --git a/bsd/sweet_hfs/core/hfs_xattr.c b/bsd/sweet_hfs/core/hfs_xattr.c
+--- a/bsd/sweet_hfs/core/hfs_xattr.c
++++ b/bsd/sweet_hfs/core/hfs_xattr.c
+@@ -1274,7 +1274,14 @@
+ 		/* Copy in the attribute data (if any). */
+ 		if (attrsize > 0) {
+ 			if (data_ptr) {
+-				bcopy(data_ptr, &recp->attrData.attrData, attrsize);
++				/*
++				 * attrData is a 2-byte flexible-array placeholder and
++				 * recp was allocated for the full itemSize above, so
++				 * copy through an opaque pointer: otherwise fortify
++				 * compares attrsize against sizeof(attrData) (2) and
++				 * __memmove_chk panics.
++				 */
++				bcopy(data_ptr, (void *)(uintptr_t)&recp->attrData.attrData, attrsize);
+ 			} else {
+ 				/* 
+ 				 * A null UIO meant it originated in-kernel.  If they didn't supply data_ptr 

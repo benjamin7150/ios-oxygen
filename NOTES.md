@@ -379,12 +379,30 @@
   string (previously absent). Kernel `cae5fbae…` (SHA256SUMS OK). Rebuilt
   `payload-realroot.bin` `1689fad2…` and `shim-boot-realroot.img` `813e895c…`
   (kernel half 450471 B, payload 16707168 B, cmdline unchanged).
-- **Next:** `fastboot boot /home/moron/ios/oxygen-0148/shim-boot-realroot.img`
-  (userdata unchanged). Expect the preboot firmware bind to return ENOENT
-  (tolerated) instead of ENODEV/exit 74, and mount-phase-1/2 to pass. The root
-  image has no `/private/var/keybags` or `/private/var/containers` (same gap as
-  santoni v8), so keybagd/containermanagerd are the likely next walls; fixing
-  those needs a `userdata` reflash (ask first).
+- **Boot of `813e895c…` (kernel `cae5fbae`, 0153): BINDFS WALL CLEARED.**
+  Photo `photo_2026-10-29_23-59-38.jpg`: the preboot firmware bind no longer
+  fails (no ENODEV/exit 74); launchd reaches ondemand and spawns fseventsd,
+  locationd, identityservicesd, rapportd, driverkitd, xpcproxy, cfprefsd, etc.
+  Then a kernel panic: `__memmove_chk object size check failed ... (2 < 15)`.
+- **Cause `0154`:** disassembling the 0153 kernel, the only `__memmove_chk`
+  call site with `chk_size=2` is `_hfs_setxattr_internal` at
+  `fffffff00779c03c`: the inlined `bcopy(data_ptr, &recp->attrData.attrData,
+  attrsize)` at `hfs_xattr.c:1277`. `HFSPlusAttrData.attrData[2]` is a
+  flexible-array placeholder; `recp` is allocated for
+  `sizeof(HFSPlusAttrData) - 2 + attrsize` at line 1265, so the fortify
+  object-size check is a false positive (a scan of all 248 `__memmove_chk`
+  sites found no other `chk_size <= 2`; the next smallest constants are
+  legitimate fixed-size fields).
+- **Fix `0154-sweet-hfs-xattr-inline-data-chk.patch`:** copy through an opaque
+  pointer, `(void *)(uintptr_t)&recp->attrData.attrData`, so
+  `__builtin_object_size` cannot resolve the 2-byte placeholder; the on-disk
+  struct is unchanged. `uintptr_t` is already used in this file. Generated
+  against the exact post-`0153` CI source; `git apply --check` and
+  `patch --fuzz=0` both clean; result byte-identical to the local file.
+- **Next:** CI build `0154`, verify the uploaded buildtree `hfs_xattr.c`
+  matches and the disassembly has no `chk_size=2` `__memmove_chk` call in
+  `_hfs_setxattr_internal`, rebuild `shim-boot-realroot.img`, `fastboot boot`
+  (userdata unchanged).
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 
