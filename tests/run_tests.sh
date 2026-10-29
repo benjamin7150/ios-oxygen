@@ -24,6 +24,7 @@ P144="xnu/patches/0144-santoni-4k-unsigned-dyld-cache.patch"
 P145="xnu/patches/0145-oxygen-board-target.patch"
 P146="xnu/patches/0146-iig-kernelcontent.patch"
 P147="xnu/patches/0147-oxygen-sweet-boot-cpu.patch"
+P148="xnu/patches/0148-sweet-hfs-sysctl-macros.patch"
 
 echo "== host unit tests (-Wall -Wextra) =="
 for t in test_sdhci_mock test_gpt_parser test_log_ring; do
@@ -287,6 +288,18 @@ python3 tools/check_patch.py "$P147" -q \
 	--added-contains 'iokit/Kernel/arm/SweetCPU.cpp:const uint32_t expected_boot_phys = 0x0;' \
 	--added-contains 'iokit/Kernel/arm/SweetCPU.cpp:expected_boot_phys, topology->boot_cpu->phys_id'
 echo "ok   0147 accepts the ABL boot core 0x0 only for OXYGEN"
+
+echo "== OXY-05: built-in HFS keeps public, manually registered sysctls (0148) =="
+python3 tools/check_patch.py "$P148" -q \
+	--added-contains 'bsd/sweet_hfs/sweet_hfs_compat.h:#undef SYSCTL_OID' \
+	--added-contains 'bsd/sweet_hfs/sweet_hfs_compat.h:#undef SYSCTL_NODE' \
+	--added-contains 'bsd/sweet_hfs/sweet_hfs_compat.h:#define SYSCTL_OID(parent, nbr, name, kind, a1, a2, handler, fmt, descr)' \
+	--added-contains 'bsd/sweet_hfs/sweet_hfs_compat.h:#define SYSCTL_NODE(parent, nbr, name, access, handler, descr)' \
+	--added-contains 'bsd/sweet_hfs/sweet_hfs_compat.h:CTLFLAG_PERMANENT' \
+	--added-contains 'bsd/sweet_hfs/sweet_hfs_compat.h:hfs_sysctl_register()'
+python3 tools/check_patch.py xnu/patches/0026-sweet-builtin-hfs.patch -q \
+	--added-contains 'bsd/sweet_hfs/sweet_hfs_iokit.c:hfs_sysctl_register();'
+echo "ok   0148 restores non-permanent OIDs for HFS's late explicit registration"
 
 echo "== CI-01: Xcode 16 iig expects the kernel-side IORPC.kernelContent field (0146) =="
 python3 tools/check_patch.py "$P146" -q \

@@ -1,0 +1,28 @@
+diff --git a/bsd/sweet_hfs/sweet_hfs_compat.h b/bsd/sweet_hfs/sweet_hfs_compat.h
+--- a/bsd/sweet_hfs/sweet_hfs_compat.h
++++ b/bsd/sweet_hfs/sweet_hfs_compat.h
+@@ -33,6 +33,24 @@
+ #undef HFS_COMPRESSION
+ #include "core/kext-config.h"
+ 
++/*
++ * <sys/vnode_internal.h> above includes <sys/sysctl.h> while
++ * XNU_KERNEL_PRIVATE is still defined, so its include guard pins the
++ * core-kernel SYSCTL_OID and SYSCTL_NODE macros. HFS is a built-in provider
++ * that registers its OIDs from hfs_sysctl_register() after bsd_init(), not
++ * from a kext. Restore the public (kext) forms so the OIDs are not
++ * CTLFLAG_PERMANENT and do not also get an automatic early registration;
++ * either would make hfs_sysctl_register() panic in sysctl_register_oid().
++ */
++#undef SYSCTL_OID
++#undef SYSCTL_NODE
++#define SYSCTL_OID(parent, nbr, name, kind, a1, a2, handler, fmt, descr) \
++	__SYSCTL_OID(parent, nbr, name, kind, a1, a2, handler, fmt, descr)
++#define SYSCTL_NODE(parent, nbr, name, access, handler, descr) \
++	struct sysctl_oid_list sysctl_##parent##_##name##_children; \
++	SYSCTL_OID(parent, nbr, name, CTLTYPE_NODE|access, \
++	    &sysctl_##parent##_##name##_children, 0, handler, "N", descr)
++
+ /* Built in, not a loadable kext (see sweet_hfs_iokit.c). */
+ #define OSKextGetCurrentLoadTag sweet_hfs_current_load_tag
+ #endif
