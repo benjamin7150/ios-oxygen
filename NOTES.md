@@ -293,9 +293,15 @@
   unsigned cache) return TRUE — a blob-less vnode has nothing to range-check.
   A vnode that DOES carry a blob must still fully cover the range. Verified:
   `git apply` clean on pristine `ubc_subr.c`, produces intended file.
-- **Build/boot:** kernel-only fix — `userdata` needs NO reflash. Rebuild via
-  CI (`xnu.yml`, `macos-15-intel`), drop `kernel.development.oxygen` into
-  `oxygen-0148/`, `./rebuild-realroot.sh`, `fastboot boot`. The `sweetlog`
+- **Build/boot:** kernel-only fix — `userdata` needs NO reflash. CI run
+  `40880584113` (macos-15-intel, headSha `e061a05`) produced
+  `kernel.development.oxygen` SHA-256 `5fdea4238b4d1eecb1fae3a7f36e69da676f7120835f698a54e9565f367b9ddd`
+  (matches SHA256SUMS; differs from 0149 `e4799dde…`). Rebuilt:
+  `payload-realroot.bin` `d7cbefd4…`, `shim-boot-realroot.img` `d3ac92b8…`
+  (kernel half `450471B` reused verbatim, ramdisk `16704512B`, cmdline+ADT
+  preserved). **Boot:** `fastboot boot oxygen-0148/shim-boot-realroot.img`.
+  Watch for whether the dyld cache now maps (no more `does not cover entire
+  shared cache file`) and launchd proceeds past libSystem. The `sweetlog`
   diagnostic image (`794be6ec…`) is no longer needed now that the photo gave
   the answer.
 
