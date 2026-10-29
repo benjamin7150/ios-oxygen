@@ -293,7 +293,7 @@
   unsigned cache) return TRUE — a blob-less vnode has nothing to range-check.
   A vnode that DOES carry a blob must still fully cover the range. Verified:
   `git apply` clean on pristine `ubc_subr.c`, produces intended file.
-- **Build/boot:** kernel-only fix — `userdata` needs NO reflash. CI run
+- **Build/boot:** added `cs_enforcement_disable=1` to `realroot-cmdline.txt` and rebuilt `shim-boot-realroot.img` (`61228711…`). This disables `cs_system_enforcement()` globally on the DEVELOPMENT kernel, bypassing the `vm_unix.c` coverage checks and trust-cache/signing gates that were rejecting the unsigned 16 KiB dyld cache (`code signature does not cover entire shared cache file`). **Boot:** `fastboot boot oxygen-0148/shim-boot-realroot.img`.
   `40880584113` (macos-15-intel, headSha `e061a05`) produced
   `kernel.development.oxygen` SHA-256 `5fdea4238b4d1eecb1fae3a7f36e69da676f7120835f698a54e9565f367b9ddd`
   (matches SHA256SUMS; differs from 0149 `e4799dde…`). Rebuilt:
