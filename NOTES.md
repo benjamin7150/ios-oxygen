@@ -317,16 +317,17 @@
 - **`0150` stays** (blob-less ranges treated as covered; harmless now that the
   blob is attached). `cs_enforcement_disable=1` also stays in the cmdline for
   the bring-up.
-- **Next:** corrected `0151` must be built again (the `40949466469` kernel
-  `08a333bf…` lacks it and is discarded). Dispatch a new run from the
-  correction commit, verify `check_patch.log` has `ok ... 0151... 3 hunk(s)`
-  AND that the uploaded buildtree's `ubc_subr.c` contains `sweet_skip_macf`
-  (artifact proof, since dxb applies before the gate), then download
-  `kernel.development.oxygen`, `cp` the current kernel to
-  `.OLD-0150`, run `oxygen-0148/rebuild-realroot.sh`, `fastboot boot`.
-  `userdata` needs no reflash (kernel-only fix). Expect the cache to map and
-  libSystem to load. Image `61228711…` is the previous (`0150` +
-  `cs_enforcement_disable=1`) build.
+- **CI build `40951699032` (headSha `bfde1f1`) SUCCESS, verified:** the
+  uploaded buildtree `ubc_subr.c` is byte-identical to the patched local file
+  (`sweet_skip_macf` present at 4660/4729), so dxb really applied `0151`.
+  Kernel `8cab9305…` (SHA256SUMS OK; differs from `0150`'s `5fdea423…`).
+  Rebuilt `payload-realroot.bin` `4ad7cb41…` and
+  `shim-boot-realroot.img` `49e2ae54…` (kernel half 450471 B unchanged,
+  payload 16704512 B, cmdline includes `cs_enforcement_disable=1`).
+- **Next: boot `fastboot boot /home/moron/ios/oxygen-0148/shim-boot-realroot.img`**
+  (userdata unchanged, no flash). Expect dyld's `F_ADDFILESIGS_RETURN` to
+  report real coverage, the cache to map, and libSystem to load; if it panics,
+  photograph the lines above `SWEET EARLY PANIC`.
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 
