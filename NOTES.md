@@ -317,11 +317,30 @@
   both artifacts with identical SHA-256 (`ca6772e8…` / `e7218074…`), so the new
   kernel just gets downloaded to `oxygen-0148/kernel.development.oxygen` and the
   script run.
-- **Next:** when `40869445845` finishes, download `kernel.development.oxygen`,
-  run `rebuild-realroot.sh`, then `fastboot boot
-  shim-boot-realroot.img`. `userdata` already holds the verified iOS 16 root
-  (`ios16-root.simg`); **no reflash needed** - this is a kernel-only fix. Any
-  new partition write still needs fresh confirmation.
+- **Build done (fixed):** `macos-14` runner capacity stalled (run
+  `40871384466` sat `queued` ~14 min, never allocated a runner; the prior
+  successful build picked up instantly). Cancelled and re-dispatched on
+  **`macos-15-intel`** (Xcode 16; patch `0146` exists for it) - run
+  **`40872230257`** went `in_progress` immediately and PASSED in 9m31s.
+  `xnu.yml` itself was never wrong.
+- **New kernel:** `kernel.development.oxygen` SHA-256
+  `e4799dde9f9f18368054b09f8be29121cd247f7d9c69720eec06ae43cb45f524`
+  (matches artifact `SHA256SUMS`; old 0148 kernel kept as
+  `kernel.development.oxygen.OLD-0148`). Verified the four `__memmove_chk`
+  callers in `catrec_update`/`buildrecord` are gone from the binary - only the
+  pre-existing legit `cat_getdirentries` call remains.
+- **New artifacts (verified):** `payload-realroot.bin` SHA-256
+  `58da1f3454e19f6e39b82ec2f05e4c00e795290944a9f9b873aa0d37a95272d4`,
+  `shim-boot-realroot.img` SHA-256
+  `1ad4770431ff98d3df62a94895dcf2d98399b45362c74122d6c837f193f03133`
+  (17,158,144 B). Embedded ADT == `oxygen.adt` (`0b5d5394…`), cmdline ==
+  `realroot-cmdline.txt`, ramdisk == payload byte-for-byte, 10 segs, no init.
+- **Ready to boot (non-destructive `fastboot boot`):**
+  `fastboot boot /home/moron/ios/oxygen-0148/shim-boot-realroot.img`
+  Expect to get past the `subrs.c:725` panic and reach the real launchd/root
+  mount. `userdata` already holds the verified iOS 16 root (`ios16-root.simg`);
+  **no reflash needed** - this was a kernel-only fix. Any new partition write
+  still needs fresh confirmation. Record the screen/panic output after boot.
 
 ## oxygen (2026-10-29): real iOS 16.7.16 HFS+ root image built
 
