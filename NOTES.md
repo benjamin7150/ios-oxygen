@@ -374,9 +374,17 @@
   empty), so with bindfs present the bind returns ENOENT, which the `env 0`
   caller tolerates. Verified with `git apply --check` and `patch --fuzz=0`
   against the exact CI config; result byte-identical.
-- **Next:** CI build `0153`, verify the uploaded buildtree config has `bindfs`
-  AND the kernel binary contains the `bindfs` string, rebuild
-  `shim-boot-realroot.img`, `fastboot boot` (userdata unchanged).
+- **CI build `40958455159` (headSha `46aa88b`) SUCCESS, verified:** buildtree
+  config has `bindfs`, and the kernel binary itself contains the `bindfs`
+  string (previously absent). Kernel `cae5fbae…` (SHA256SUMS OK). Rebuilt
+  `payload-realroot.bin` `1689fad2…` and `shim-boot-realroot.img` `813e895c…`
+  (kernel half 450471 B, payload 16707168 B, cmdline unchanged).
+- **Next:** `fastboot boot /home/moron/ios/oxygen-0148/shim-boot-realroot.img`
+  (userdata unchanged). Expect the preboot firmware bind to return ENOENT
+  (tolerated) instead of ENODEV/exit 74, and mount-phase-1/2 to pass. The root
+  image has no `/private/var/keybags` or `/private/var/containers` (same gap as
+  santoni v8), so keybagd/containermanagerd are the likely next walls; fixing
+  those needs a `userdata` reflash (ask first).
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 
