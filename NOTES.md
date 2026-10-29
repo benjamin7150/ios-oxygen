@@ -350,10 +350,33 @@
   5769), so dxb applied `0152`. Kernel `a88a8e6d…` (SHA256SUMS OK). Rebuilt
   `payload-realroot.bin` `0b8b1bfd…` and `shim-boot-realroot.img` `da70f2e8…`
   (kernel half 450471 B, payload 16704512 B, cmdline unchanged).
-- **Next:** `fastboot boot /home/moron/ios/oxygen-0148/shim-boot-realroot.img`
-  (userdata unchanged). Expect the 16 KiB-hash pages to validate as unsigned,
-  the dyld cache to map, libSystem to load and launchd to proceed; photograph
-  the lines above `SWEET EARLY PANIC` if it stops.
+- **Boot of `da70f2e8…` (kernel `a88a8e6d`, 0152): DYLD CACHE WALL CLEARED.**
+  Photo `IMG_20261029_231632.jpg`: no more
+  `code signature does not cover entire shared cache file`; libignition opens
+  `/System/Library/Caches/com.apple.dyld` and reports
+  `ignition sequence complete`; Apple `launchd` runs (`Darwin Bootstrapper
+  Version 7.0.0`, `entering ondemand mode`, boot task `mount-phase-1`).
+  Remaining userspace failure: `/sbin/mount` (pid 2) cannot bind
+  `/private/preboot/7C18…/usr/standalone/firmware` ->
+  `Operation not supported by device(19)` (ENODEV), exits 74 ->
+  `SWEET EARLY PANIC: mount[2] exited` (logged; launchd continued).
+  `mount-phase-1` then logs `failed to get filesystem info` x2,
+  `mount: data volume missing, but not required in env: 0`, and
+  `GetMasterBlock: Error 16 opening /dev/emmcroot0` (EBUSY on the mounted
+  root, non-fatal per santoni 0036/0037).
+- **Cause:** `config/MASTER.arm64.oxygen` (created by `0145`) never got
+  santoni's `0037` bindfs addition: its `FILESYS_BASE` has `nullfs` but no
+  `bindfs`, and the built kernel contains no `bindfs` string/symbol. santoni's
+  `0037` only patched `MASTER.arm64.sweet`.
+- **Fix `0153-oxygen-config-bindfs.patch`:** add `bindfs` to
+  `FILESYS_BASE` in `MASTER.arm64.oxygen` (same position as sweet). The preboot
+  source dir is absent from our single-root image (`/private/preboot` is
+  empty), so with bindfs present the bind returns ENOENT, which the `env 0`
+  caller tolerates. Verified with `git apply --check` and `patch --fuzz=0`
+  against the exact CI config; result byte-identical.
+- **Next:** CI build `0153`, verify the uploaded buildtree config has `bindfs`
+  AND the kernel binary contains the `bindfs` string, rebuild
+  `shim-boot-realroot.img`, `fastboot boot` (userdata unchanged).
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 
