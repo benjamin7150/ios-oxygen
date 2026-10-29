@@ -303,10 +303,23 @@
   `/home/moron/ios/oxygen-0148/buildtree/xnu/bsd/sweet_hfs/core/hfs_catalog.c`.
 - **No overlap:** 0041 (lines 757/865/877) and 0052 (4459) touch `hfs_catalog.c`
   elsewhere; 0149 only edits 1624/1691/3734/3750.
-- **Next:** kernel is CI-built (no local clang/xcrun/iig/mig on this host). Push
-  `0149` to trigger an xnu.yml run, download `kernel.development.oxygen`, rebuild
-  `payload-realroot.bin` + `shim-boot-realroot.img` with the same cmdline/ADT,
-  then `fastboot boot` again. `userdata` already holds the verified iOS 16 root
+- **Build triggered:** patch `0149` committed as `3475106`, pushed to
+  `benjamin7150/ios-oxygen` `ci-x64`, and CI run **`40869445845`** dispatched via
+  `gh workflow run xnu.yml` (OXYGEN / DEVELOPMENT / macos-14, same inputs as
+  0148's `40852050083`). Runs are all `workflow_dispatch` on `ci-x64` (the
+  `push:` trigger doesn't fire here); a push alone does NOT start a build.
+- **Rebuild recipe verified byte-for-byte:** `oxygen-0148/rebuild-realroot.sh
+  <kernel>` extracts the unchanged shim kernel half (shim Image + oxygen
+  appended DTB, 450,471 B) from the existing `shim-boot-realroot.img`, runs
+  `tools/mkpayload.py <kernel> oxygen.adt payload-realroot.bin --cmdline "$(cat
+  realroot-cmdline.txt)"`, then repacks with `tools/mkbootimg.py --base
+  0x80000000 --pagesize 2048`. Dry-run against the unfixed kernel reproduces
+  both artifacts with identical SHA-256 (`ca6772e8…` / `e7218074…`), so the new
+  kernel just gets downloaded to `oxygen-0148/kernel.development.oxygen` and the
+  script run.
+- **Next:** when `40869445845` finishes, download `kernel.development.oxygen`,
+  run `rebuild-realroot.sh`, then `fastboot boot
+  shim-boot-realroot.img`. `userdata` already holds the verified iOS 16 root
   (`ios16-root.simg`); **no reflash needed** - this is a kernel-only fix. Any
   new partition write still needs fresh confirmation.
 
