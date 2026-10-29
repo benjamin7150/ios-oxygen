@@ -1,0 +1,43 @@
+diff --git a/bsd/sweet_hfs/core/hfs_catalog.c b/bsd/sweet_hfs/core/hfs_catalog.c
+--- a/bsd/sweet_hfs/core/hfs_catalog.c
++++ b/bsd/sweet_hfs/core/hfs_catalog.c
+@@ -1624,7 +1624,8 @@
+ 			dir->textEncoding = descp->cd_encoding;
+ 		}
+ 		dir->folderCount      = attrp->ca_dircount;
+-		bcopy(&attrp->ca_finderinfo[0], &dir->userInfo, 32);
++		bcopy(&attrp->ca_finderinfo[0], &dir->userInfo, 16);
++		bcopy(&attrp->ca_finderinfo[16], &dir->finderInfo, 16);
+ 		/*
+ 		 * Update the BSD Info if it was already initialized on
+ 		 * disk or if the runtime values have been modified.
+@@ -1691,7 +1692,8 @@
+ 		} else {
+ 			file->textEncoding = descp->cd_encoding;
+ 		}
+-		bcopy(&attrp->ca_finderinfo[0], &file->userInfo, 32);
++		bcopy(&attrp->ca_finderinfo[0], &file->userInfo, 16);
++		bcopy(&attrp->ca_finderinfo[16], &file->finderInfo, 16);
+ 		/*
+ 		 * Update the BSD Info if it was already initialized on
+ 		 * disk or if the runtime values have been modified.
+@@ -3734,7 +3736,8 @@
+ 		crp->hfsPlusFolder.backupDate = 0;
+ 		crp->hfsPlusFolder.textEncoding = encoding;
+ 		crp->hfsPlusFolder.folderCount = 0;
+-		bcopy(attrp->ca_finderinfo, &crp->hfsPlusFolder.userInfo, 32);
++		bcopy(attrp->ca_finderinfo, &crp->hfsPlusFolder.userInfo, 16);
++		bcopy(&attrp->ca_finderinfo[16], &crp->hfsPlusFolder.finderInfo, 16);
+ 		bsdp = &crp->hfsPlusFolder.bsdInfo;
+ 		bsdp->special.linkCount = 1;
+ 		*recordSize = sizeof(HFSPlusCatalogFolder);
+@@ -3750,7 +3753,8 @@
+ 		crp->hfsPlusFile.backupDate = 0;
+ 		crp->hfsPlusFile.textEncoding = encoding;
+ 		crp->hfsPlusFile.reserved2 = 0;
+-		bcopy(attrp->ca_finderinfo, &crp->hfsPlusFile.userInfo, 32);
++		bcopy(attrp->ca_finderinfo, &crp->hfsPlusFile.userInfo, 16);
++		bcopy(&attrp->ca_finderinfo[16], &crp->hfsPlusFile.finderInfo, 16);
+ 		bsdp = &crp->hfsPlusFile.bsdInfo;
+ 		/* BLK/CHR need to save the device info */
+ 		if (type == S_IFBLK || type == S_IFCHR) {

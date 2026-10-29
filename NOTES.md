@@ -269,6 +269,47 @@
   image is read-only-verified only, and its ownership caveat is recorded
   above.
 
+## oxygen (2026-10-29, active): real-root boot panic fixed - sweet_hfs finderinfo overflow
+
+- **What happened:** the user confirmed the destructive `userdata` write
+  (`CONFIRM FLASH USERDATA`), flashed
+  `fastboot -S 512M flash userdata /home/moron/ios/oxygen-root/ios16-root.simg`
+  to completion, then `fastboot boot
+  /home/moron/ios/oxygen-0148/shim-boot-realroot.img`. The kernel now reaches
+  the real HFS+ root mount and panics:
+  `SWEET EARLY PANIC: __memmove_chk object size check failed: dst 0xfffffff803a38c5e, src 0xfffffff71d4975ec (16<32) @ subrs.c:725`.
+- **Diagnosis (offline, symbol-parsed Mach-O):** `__memmove_chk` fires when a
+  `bcopy`/`memmove` length exceeds the destination's compile-time object size.
+  The build already warned about it four times in
+  `bsd/sweet_hfs/core/hfs_catalog.c` ("'memmove' will always overflow;
+  destination buffer has size 16, but size argument is 32"). All four sites
+  copy the full 32-byte `cat_attr.ca_finderinfo` into a single 16-byte field:
+  - `catrec_update` folder: `bcopy(&attrp->ca_finderinfo[0], &dir->userInfo, 32)`
+  - `catrec_update` file:   `bcopy(&attrp->ca_finderinfo[0], &file->userInfo, 32)`
+  - `buildrecord` folder:   `bcopy(attrp->ca_finderinfo, &crp->hfsPlusFolder.userInfo, 32)`
+  - `buildrecord` file:     `bcopy(attrp->ca_finderinfo, &crp->hfsPlusFile.userInfo, 32)`
+  In Apple's layout `userInfo` (16) and `finderInfo` (16) are adjacent, so one
+  32-byte copy lands correctly and upstream hfs-627.100.6 gets away with it;
+  under SWEET's `bcopy`->`__memmove_chk` the 16-byte destination type trips
+  the check the first time the catalog is walked (root mount). The 0150 reverse
+  read at line ~3939 (`bcopy(&crp->userInfo, attrp->ca_finderinfo, 32)`) writes
+  *into* the 32-byte `ca_finderinfo`, so only the four destination-overflow
+  sites panic.
+- **Fix:** new patch `xnu/patches/0149-sweet-hfs-finderinfo-chk.patch` splits
+  each 32-byte copy into `userInfo` (first 16) + `finderInfo` (last 16),
+  preserving the on-disk layout. Verified `git apply --check` is clean against
+  the pristine staged hfs-627.100.6 source and the result is byte-identical to
+  the intended fix. The applied tree is
+  `/home/moron/ios/oxygen-0148/buildtree/xnu/bsd/sweet_hfs/core/hfs_catalog.c`.
+- **No overlap:** 0041 (lines 757/865/877) and 0052 (4459) touch `hfs_catalog.c`
+  elsewhere; 0149 only edits 1624/1691/3734/3750.
+- **Next:** kernel is CI-built (no local clang/xcrun/iig/mig on this host). Push
+  `0149` to trigger an xnu.yml run, download `kernel.development.oxygen`, rebuild
+  `payload-realroot.bin` + `shim-boot-realroot.img` with the same cmdline/ADT,
+  then `fastboot boot` again. `userdata` already holds the verified iOS 16 root
+  (`ios16-root.simg`); **no reflash needed** - this is a kernel-only fix. Any
+  new partition write still needs fresh confirmation.
+
 ## oxygen (2026-10-29): real iOS 16.7.16 HFS+ root image built
 
 - **Donor:** iPhone 8 Plus (`D21AP` / `iPhone10,2`), iOS 16.7.16
