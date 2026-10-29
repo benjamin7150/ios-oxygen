@@ -206,14 +206,26 @@
   DTB exactly once; payload has 11 segments, the preserved ADT random seed,
   and `init.macho` exactly once; the Android header cmdline matches the
   tested string. No device commands run; no partitions written.
+- **0148 hardware boot (2026-10-29, user report):** `fastboot boot` of
+  `/home/moron/ios/oxygen-0148/shim-boot.img` reached:
+  ```
+  *** SANTONI userspace: init running as PID 1 ***
+  ```
+  This is the static test init from `tools/santoni-init.S`, not Apple
+  launchd; the `SANTONI` label is hard-coded in that test program. The
+  result proves the kernel passed the HFS permanent-sysctl panic and
+  reached userspace PID 1, so the 0148 fix is now boot-confirmed. The user
+  has not yet reported whether the following `/dev/remmcroot0` read line
+  and the five-second `SANTONI init: still alive (tick)` heartbeat appeared;
+  do not call this a full iOS userspace boot yet.
 - **Open items:**
-  1. The 0148 image is ready for the next RAM-only boot. The phone is
-     still on the old panic screen; power-cycle it, then the user runs:
-     `adb reboot bootloader` (or Power+Volume Down), `fastboot devices`,
-     `fastboot boot /home/moron/ios/oxygen-0148/shim-boot.img`.
-     Record `BOOT_CPU`, the loader output,
-     `SWEET HFS: hfs-627.100.6 registered`, and any next panic. Do not
-     flash any partition.
+  1. **0148 test-init path:** ask the user to leave the current boot running
+     long enough to capture whether
+     `SANTONI userspace: read eMMC LBA 0: [...]` and repeated
+     `SANTONI init: still alive (tick)` appear. If they do, the test init
+     path is complete; the next milestone is real iOS userland (replace the
+     static init with the donor launchd/rootfs path), not another test-init
+     boot. Do not flash any partition.
   2. Display identity: the real iPhone 8 Plus UI is 414x736 pt @3x
      (1242x2208 canvas) while our native canvas is 1080x1920 @3x
      (360x640 pt, not a real screen size; UIKit's "No status bar visual
@@ -234,15 +246,13 @@
   `ci-x64`. All fork-local commits since `e0ac369` are under
   author/committer `benjamin7150`; both branches are force-pushed to
   `fork`.
-- **Next concrete action:** the 0148 image is built and verified; boot it
-  RAM-only. The device is currently sitting on the `kern_newsysctl.c:254`
-  panic screen, so power-cycle it first (or hold Power+Volume Down for
-  fastboot), then run `adb reboot bootloader`, `fastboot devices`, and
-  `fastboot boot /home/moron/ios/oxygen-0148/shim-boot.img`. Do not flash
-  any partition; `/storage/emulated/0/shim-boot.img` is only a backup.
-  Record the HFS registration line and the next displayed output, and
-  update this section. The HFS fix is CI-verified but not yet
-  boot-confirmed.
+- **Next concrete action:** the 0148 image is booted and the static test
+  init is running; do not reboot or flash yet. Capture the remaining lines
+  above (`/dev/remmcroot0` read and heartbeat). Once confirmed, prepare the
+  next RAM-only image with the real iOS 16 userland/launchd and the existing
+  `userdata` root plan; keep bootloader, recovery, modem, persist and
+  backups untouched. The HFS fix is boot-confirmed; full iOS userspace is
+  not.
 
 ## dff9f18 (2026-10-22): fix EL1 permission fault on `/dev/remmcroot0` reads
 
