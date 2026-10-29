@@ -345,9 +345,15 @@
   (`hash_pageshift == PAGE_SHIFT`) keep the existing hashing path unchanged.
   Generated against the exact post-`0151` CI source; `git apply --check` and
   `patch --fuzz=0` both clean; result byte-identical to the local file.
-- **Next:** CI build `0152`, verify the uploaded buildtree contains the
-  `csb_hash_pageshift > PAGE_SHIFT` branch, rebuild
-  `shim-boot-realroot.img`, `fastboot boot` (userdata unchanged).
+- **CI build `40954504453` (headSha `db28484`) SUCCESS, verified:** uploaded
+  buildtree `ubc_subr.c` is byte-identical to the patched file (0152 branch at
+  5769), so dxb applied `0152`. Kernel `a88a8e6d…` (SHA256SUMS OK). Rebuilt
+  `payload-realroot.bin` `0b8b1bfd…` and `shim-boot-realroot.img` `da70f2e8…`
+  (kernel half 450471 B, payload 16704512 B, cmdline unchanged).
+- **Next:** `fastboot boot /home/moron/ios/oxygen-0148/shim-boot-realroot.img`
+  (userdata unchanged). Expect the 16 KiB-hash pages to validate as unsigned,
+  the dyld cache to map, libSystem to load and launchd to proceed; photograph
+  the lines above `SWEET EARLY PANIC` if it stops.
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 
