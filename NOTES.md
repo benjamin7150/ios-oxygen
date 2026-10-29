@@ -413,12 +413,37 @@
   created by `oxygen-root/qemu/init`. (The earlier "missing" observation was
   about the OS staging tree, not the built image.) No reflash is needed for
   these; any future partition write still needs fresh confirmation.
-- **Next:** `fastboot boot /home/moron/ios/oxygen-0148/shim-boot-realroot.img`
-  (userdata unchanged). Expect the xattr panic to be gone and boot tasks to
-  continue. The daemon crashes seen before the panic (fseventsd SIGBUS,
-  locationd "file does not start with MH_MAGIC_64", rapportd text-page
-  corruption) are not yet diagnosed; if they persist, capture them and check
-  whether they are cache/hard-link related before touching userdata.
+- **Boot of `ee080651…` (kernel `4878a160`, 0154): XATTR PANIC GONE, boot
+  reaches launchd + daemons.** Photo `photo_2026-10-30_00-41-00.jpg`: no
+  `__memmove_chk`; launchd spawns datamigrator, contextstored, cfprefsd,
+  xpcproxy, profiled, syncdefaultsd, adprivacyd, locationd. Then daemons die:
+  contextstored[328] and adprivacyd[377] both SIGILL at `pc 0x1c0a6f744`
+  (`lr 0x1c0a4e634`); cfprefsd[384] SIGILL at `pc 0x1c592c780`; profiled[386]
+  SIGSEGV at `0x101c458a8` after `cs_invalid_page(0x10040e000) ... allowing
+  (remove VALID) page`; locationd SIGABRT. Crash logs report shared-cache
+  `slide 0x3ee6c000`.
+- **Offline: the root image is intact.** Extracted the actual image's
+  `/usr/libexec/profiled` and the `.01` cache inode
+  (`[HFS+ Private Data]/iNode14533753`) with 7z; both are byte-identical to
+  the staging tree (`profiled` `0331e5dc…`, `.01` `160a3cf9…`), profiled's 261
+  CodeDirectory page hashes all pass, and the crash page in `.01` contains the
+  valid function entry `cbz x0, ...`. Unsliding `0x1c0a6f744` by `0x3ee6c000`
+  gives `0x181c03744` = CoreServices +0x2f744, called by a normal `bl` from
+  CoreServices +0xe634. So the on-disk code is good; the fault is runtime
+  code-signing invalidation (taint), not image corruption.
+- **Diagnostic images built (kernel `4878a160`, `cs_debug=6`):**
+  `shim-boot-realroot-csdebug.img` `d5019d6c…` (payload `674c0a16…`), and
+  `shim-boot-realroot-sweetlog.img` `309ee993…` (`sweetlog=1 cs_debug=6`,
+  payload `37592fe6…`; the stale 0148-era image is now
+  `shim-boot-realroot-sweetlog.img.OLD-0148`). Both keep the unchanged 450471 B
+  shim kernel half. `rebuild-realroot.sh` now accepts `CMDLINE_FILE`, `OUT_IMG`,
+  `PAYLOAD`, `SOURCE_IMG` overrides.
+- **Next:** boot `shim-boot-realroot-csdebug.img` (userdata unchanged) and read
+  the `CODESIGNING: vm_page_validate_cs_fast ... was modified` / `vm_fault:
+  signed: ... tainted: ... wpmapped: ...` lines above the crash; or boot the
+  sweetlog image and pull the 4 MiB ring via recovery. That decides between
+  the wpmapped-taint path (then exempt shared-cache/kernel-slid pages or honor
+  `cs_enforcement_disable` before taint) and a hash/no-hash path.
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 
