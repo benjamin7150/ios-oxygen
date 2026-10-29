@@ -223,14 +223,15 @@
   SDHCI/userspace read path on oxygen; it is not an HFS-root mount. This
   completes the test-init path, but is not a full iOS userspace boot.
 - **Open items:**
-  1. **0148 test-init path: COMPLETE.** PID 1, `/dev/console`, the
-     five-second timer and a raw `/dev/remmcroot0` LBA-0 read are all
-     confirmed on hardware. The next milestone is a real iOS 16 root image
-     (D21AP / 20H392 HFS root plus launchd/dyld cache), not another
-     test-init boot. This host currently has only the extracted D21AP ADT
-     under `research/ipsw-8plus`; the donor root/cryptex DMGs and
-     `apfs-fuse` are not present. Do not flash any partition until the root
-     image is built or imported and the destructive step is confirmed.
+  1. **0148 test-init path: COMPLETE; real root image built.** PID 1,
+     `/dev/console`, the five-second timer and a raw `/dev/remmcroot0`
+     LBA-0 read are all confirmed on hardware. The D21AP / 20H392 HFS
+     root image is now built and read-only-verified (see the section
+     above), but it has **not** been flashed or booted. Staging was
+     rootless, so most files are root:wheel rather than the donor's
+     original numeric owners; that is the first thing to revisit if a
+     later launchd/permission failure appears. Do not flash any partition
+     until the destructive step is explicitly confirmed.
   2. Display identity: the real iPhone 8 Plus UI is 414x736 pt @3x
      (1242x2208 canvas) while our native canvas is 1080x1920 @3x
      (360x640 pt, not a real screen size; UIKit's "No status bar visual
@@ -251,16 +252,79 @@
   `ci-x64`. All fork-local commits since `e0ac369` are under
   author/committer `benjamin7150`; both branches are force-pushed to
   `fork`.
-- **Next concrete action:** the test-init path is complete; no further
-  test-init boot is needed. The next milestone is a real iOS 16 root: build
-  or import the D21AP/20H392 HFS root image. This host currently lacks the
-  donor OS/SystemOS/AppOS DMGs and `apfs-fuse`, so first mount/copy the
-  donor assets or download the iPhone 8 Plus IPSW, then run
-  `tools/mkiosroot.sh`. Flash it into the existing `userdata` only after the
-  image is built and verified, and ask for explicit confirmation immediately
-  before that destructive step; no GPT changes. Keep bootloader, recovery,
-  modem, persist and backups untouched. The HFS sysctl fix and test-init
-  path are boot-confirmed; full iOS userspace is not.
+- **Next concrete action:** the test-init path is complete and no further
+  test-init boot is needed. The real root image is built and verified at
+  `/home/moron/ios/oxygen-root/ios16-root.simg`
+  (SHA-256
+  `f4fe214b8534c177dbdf42190087fa89bd6cbfd6e306bd30ecce257d9cc58671`)
+  and the real-root boot image is
+  `/home/moron/ios/oxygen-0148/shim-boot-realroot.img`
+  (SHA-256
+  `e72180748e4ed39859940ef3ffbb3d9550bc62dbfec9a0de01c1dd45dc9b5f5b`).
+  The next step is destructive: confirm immediately before running
+  `fastboot -S 512M flash userdata /home/moron/ios/oxygen-root/ios16-root.simg`,
+  then run `fastboot boot /home/moron/ios/oxygen-0148/shim-boot-realroot.img`.
+  Do not change GPT and do not touch bootloader, recovery, modem, persist
+  or backups. Full iOS userspace has not been booted yet; the current root
+  image is read-only-verified only, and its ownership caveat is recorded
+  above.
+
+## oxygen (2026-10-29): real iOS 16.7.16 HFS+ root image built
+
+- **Donor:** iPhone 8 Plus (`D21AP` / `iPhone10,2`), iOS 16.7.16
+  (`20H392`), IPSW SHA-256
+  `b3882291a92ecf8763239a026813b3bafae66b7e317dee67011d90c202ccafef`.
+  Donor `sbin/launchd` and `usr/lib/dyld` are **plain arm64**
+  (`cpusub 0`), not arm64e; AppOS binaries are universal arm64/arm64e.
+  This is suitable for oxygen's Cortex-A53 (no PAC).
+- **Reader/staging:** upstream `apfs-fuse` at commit `66b86bd` built at
+  `/home/moron/ios/oxygen-root/tools/apfs-new/bin/apfs-fuse` with
+  LZBITMAP support. It reads compressed AppOS files such as
+  `usr/libexec/webpushd` (Mach-O `cafebabe`). All three DMGs were
+  mounted, and the complete donor root was staged with
+  `rsync -aH --numeric-ids` as a non-root user: OS 317,823 entries /
+  8.3 GiB, SystemOS 2,094 / 3.2 GiB, AppOS 1,048 / 11 MiB; zero
+  `send_files failed` errors. Staging ownership is therefore collapsed to
+  the host uid; the QEMU builder sets root:wheel and restores only
+  `mobile` 501 and `_logd` 272. That is the main ownership caveat.
+- **Root image:** `/home/moron/ios/oxygen-root/ios16-root.img`, 16 GiB,
+  HFSX case-sensitive journaled, volume `iOSRoot`
+  (`mkfs.hfsplus -s -J -v iOSRoot`). It was populated in a rootless QEMU
+  guest using a virtiofs source and HFS+ target:
+  `sbin/launchd` 541,600 B root:wheel; `usr/lib/dyld` 922,912 B; 44
+  shared-cache files hard-linked from SystemOS
+  (`links=2`, 3.25 GiB); `/System/Cryptexes/{OS,App}` symlinks;
+  cryptexes 2,094 and 1,048 entries; keybag, containers, logd stores and
+  mobile ownership verified. The root-level empty `.file` (mode 0000)
+  that `cp -a` could not open was added separately.
+- **Verified:** guest read-only mount reports 16.0 GiB total, **11.7 GiB
+  used, 4.3 GiB free (73%)**, 321,048 entries. `fsck.hfsplus -f -y`
+  reports the volume OK; `fsck.hfsplus -f -n` still reports the known
+  nonfatal "Volume header needs minor repair" on Linux-created HFSX.
+  Artifacts:
+  - raw: `ios16-root.img`, SHA-256
+    `c1a627d5c2ec4bc51e7fff924b4a5b6914b7cfb2d5199ba145ba80da9cde4593`;
+  - sparse: `ios16-root.simg`, 12 GiB, SHA-256
+    `f4fe214b8534c177dbdf42190087fa89bd6cbfd6e306bd30ecce257d9cc58671`.
+  - `simg2img ios16-root.simg roundtrip.img` reproduces the raw image
+    byte-for-byte (same `c1a627d5...` SHA-256).
+- **Real-root boot image:**
+  `/home/moron/ios/oxygen-0148/shim-boot-realroot.img` (17,158,144 B,
+  SHA-256 `e72180748e4ed39859940ef3ffbb3d9550bc62dbfec9a0de01c1dd45dc9b5f5b`).
+  Payload `/home/moron/ios/oxygen-0148/payload-realroot.bin`
+  (16,704,512 B, 10 segments, no init.macho, SHA-256
+  `ca6772e8aef69a7b51d5522639038de27d673e82c2a49aa13b214870e73d5881`).
+  Kernel is the 0148 oxygen kernel
+  (`39ae617c7014c9436802fb16c5d5ff3cbd7667dddbd97b7f55f4050ab181f42f`);
+  the preserved oxygen ADT has `no-effaceable-storage`,
+  `boot-manifest-hash`, `unique-chip-id`, `asmb`, `crypto-hash-method`,
+  `no-pmu`, `display-scale` and `lp-sip0`. The boot image header and
+  payload cmdline match:
+  `debug=0x14e serial=3 disable_kprintf_output=0 -enable_kprintf_spam sweetfb_native=1 sweetcpufreq=0 sweetbattery=0 rd=emmcroot0 -v keepsyms=1 oxygen unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin emmcrw=1 rootrw=1 launchd_unsecure_cache=1 wdt=-1 sweetfb_hz=60`.
+- **Not flashed or booted.** No partition was written. The next action is
+  explicitly destructive: flash the sparse image to the existing
+  `userdata` partition, then `fastboot boot` the real-root image. Do not
+  change GPT or touch bootloaders/recovery/modem/persist/backups.
 
 ## dff9f18 (2026-10-22): fix EL1 permission fault on `/dev/remmcroot0` reads
 
