@@ -300,17 +300,33 @@
   MACF/AMFI hook (same "boot the cache as unsigned" intent as `0144`). The
   attached blob carries `csb_end_offset = codeLimit`, so F_ADDFILESIGS_RETURN
   reports real coverage and the vm_unix map gates see a blob+cdhash.
-  Verified with strict `patch -p1`: base -> 0150 -> 0151 reproduces the
-  buildtree file exactly (3 hunks; `git apply` in a fresh no-HEAD test repo was
-  unreliable due to strip-level guessing, so use `patch(1)` for validation).
+- **First CI attempt `40949466469` (headSha `98af99c`) silently skipped `0151`**
+  and produced a kernel without it (`08a333bf…`, dxb log
+  `Skipping patch .../0151-...: error: patch failed: bsd/kern/ubc_subr.c:4648`).
+  My edit had eaten the blank line after the `0144` block's `#endif`, and GNU
+  `patch -p1` had hidden that with its default fuzz=2; dxb uses exact
+  `git apply`. Lesson: validate patches with `git apply --check` or
+  `patch --fuzz=0` against the *actual post-predecessor* file, not a
+  reconstructed base.
+- **Corrected `0151`** (regenerated against the exact CI-patched
+  `ubc_subr.c`, i.e. post-`0150`): verified with `git apply --check` and
+  `patch -p1 --fuzz=0`, result byte-identical to the intended buildtree file;
+  3 hunks (`4648`, `4722`, `4731`). Local buildtree file keeps the blank line.
+- **CI gate fixed (`5f26956`)**: the skip-gate now fails on any
+  `Skipping patch .../01xx-*.patch` line, not just `014[234567]`.
 - **`0150` stays** (blob-less ranges treated as covered; harmless now that the
   blob is attached). `cs_enforcement_disable=1` also stays in the cmdline for
   the bring-up.
-- **Next:** CI build of `0151`, download `kernel.development.oxygen`, run
-  `oxygen-0148/rebuild-realroot.sh`, `fastboot boot`. `userdata` needs no
-  reflash (kernel-only fix). Expect the cache to map and libSystem to load.
-  CI run `40880584113` (headSha `e061a05`) had produced `0150` kernel
-  `5fdea423…`; image `61228711…` is that kernel + the bootarg.
+- **Next:** corrected `0151` must be built again (the `40949466469` kernel
+  `08a333bf…` lacks it and is discarded). Dispatch a new run from the
+  correction commit, verify `check_patch.log` has `ok ... 0151... 3 hunk(s)`
+  AND that the uploaded buildtree's `ubc_subr.c` contains `sweet_skip_macf`
+  (artifact proof, since dxb applies before the gate), then download
+  `kernel.development.oxygen`, `cp` the current kernel to
+  `.OLD-0150`, run `oxygen-0148/rebuild-realroot.sh`, `fastboot boot`.
+  `userdata` needs no reflash (kernel-only fix). Expect the cache to map and
+  libSystem to load. Image `61228711…` is the previous (`0150` +
+  `cs_enforcement_disable=1`) build.
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 

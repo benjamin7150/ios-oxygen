@@ -22,9 +22,9 @@ diff --git a/bsd/kern/ubc_subr.c b/bsd/kern/ubc_subr.c
 -	}
 +	boolean_t sweet_skip_macf = (cd != NULL && cd->pageSize > PAGE_SHIFT);
  #endif
+ 
  	tmp_blob.csb_cpu_type = cputype;
- 	tmp_blob.csb_cpu_subtype = cpusubtype & ~CPU_SUBTYPE_MASK;
-@@ -4721,6 +4724,9 @@
+@@ -4722,6 +4725,9 @@
  	unsigned int cs_flags = tmp_blob.csb_flags;
  	unsigned int signer_type = tmp_blob.csb_signer_type;
  
@@ -34,7 +34,7 @@ diff --git a/bsd/kern/ubc_subr.c b/bsd/kern/ubc_subr.c
  	error = mac_vnode_check_signature(
  		vp,
  		&tmp_blob,
-@@ -4730,6 +4736,10 @@
+@@ -4731,6 +4737,10 @@
  		flags,
  		platform);
  
