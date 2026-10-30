@@ -13,8 +13,8 @@ on:
         description: xnu MACHINE_CONFIG
         default: SANTONI
       runner:
-        description: macOS runner label (macos-14 = Xcode 15; macos-15-intel = Xcode 16 + 0146)
-        default: macos-14
+        description: macOS runner label (macos-15-intel = Xcode 16 + 0146; macos-14 = Xcode 15)
+        default: macos-15-intel
       keep_going:
         description: make -k (collect all compile errors in one run)
         default: "true"
@@ -45,10 +45,10 @@ env:
 
 jobs:
   build:
-    # macos-14 still ships Xcode 15.x: its iig matches xnu-8796 natively.
-    # macos-15-intel (Xcode 16) works with 0146, which adds the kernel-side
-    # IORPC.kernelContent field emitted by Xcode 16's iig.
-    runs-on: ${{ inputs.runner || 'macos-14' }}
+    # macos-15-intel (Xcode 16) is the default; 0146 adds the kernel-side
+    # IORPC.kernelContent field emitted by Xcode 16's iig.  macos-14 still
+    # ships Xcode 15.x, whose iig matches xnu-8796 natively.
+    runs-on: ${{ inputs.runner || 'macos-15-intel' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
