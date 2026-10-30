@@ -514,6 +514,87 @@
   `tools/sweet-log-pull.sh` to keep the `system`/`userdata` partition name
   next to the resolved device path (the old `grep -q system` failed on
   `/dev/block/mmcblk0p65` and read the wrong range); commit `4a455c8`.
+- **0155 sweetlog boot analysis (2026-10-30): the code-signing crash-loop is
+  GONE, but containermanagerd now dies in its SQLite setup.** Booted
+  `shim-boot-realroot-0155-sweetlog.img` and decoded the ring to
+  `/tmp/opencode/sweetlog-0155.txt` (2564 lines). Counts: **0**
+  `cs_validate_page`, **0** `vm_fault: signed`, **0** `cs_invalid_page`,
+  **0** `Text page corruption`, **0** panics. SpringBoard, backboardd,
+  bluetoothd, healthd, pkd, etc. run. So 0155 fixed the SDHCI bounce race and
+  the runtime code corruption. New failure: **18 containermanagerd SIGTRAPs**
+  with the identical signature `sig 5 code 0x600000001 sub 0x200ca183c
+  slide 0x3bfb8000`; unslid PC `0x1c4ce983c` = `ContainerManagerCommon
+  +0x8e83c`, the final `brk #1` of `+[MCMSQLiteDB openDBWithURL:error:]`
+  (function range `0x1c4ce94bc`-`0x1c4ce9840`). Backtrace:
+  `+[MCMSQLiteDB openDBWithURL:error:]` -> `-[MCMSQLiteDB initWithURL:error:]`
+  -> `___50+[MCMCodeSigningMapping codeSignMappingWithError:]_block_invoke`
+  -> `-[MCMLibraryRepair fixAndRetryIfPermissionsErrorWithURL:error:duringBlock:]`
+  -> `+[MCMCodeSigningMapping codeSignMappingWithError:]` ->
+  `____containermanagerd_start_xpc_block_invoke` -> libdispatch.
+- **The trap is an exec failure, not an open failure.** In
+  `openDBWithURL:error:`, `sqlite3_open_v2` is at `0x1c4ce950c` with flags
+  `SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE` (w2=6); `cbz w0,
+  0x1c4ce95f4` jumps to the exec only on `SQLITE_OK`. The open-failure path
+  logs `"%{public}s(%d) opening %@ failed: %s, xerr = %x"` and returns
+  normally. The trap path at `0x1c4ce970c` is reached only when
+  `sqlite3_exec` at `0x1c4ce9610` returns nonzero; it logs
+  `"%{public}s(%d) table create for %@ failed: %s"`, then
+  `"Failed to initialize database, err = %d, xerr = %x"`, closes the DB,
+  and calls the lazy `os_crash_function` stub at `0x1c9afe0ec` (resolves
+  `os_crash_function` via dlsym at `0x18dcb07b0`) before `brk #1`. The SQL
+  string at `0x1c4d2c7d0` starts
+  `PRAGMA locking_mode = EXCLUSIVE;PRAGMA journal_mode = WAL;PRAGMA
+  foreign_keys = ON;PRAGMA auto_vacuum = FULL;CREATE TABLE ...`.
+- **The DB URL is `<containermanagerLibrary>/containers.sqlite3`.**
+  `+[MCMCodeSigningMapping codeSignMappingWithError:]` builds
+  `containermanagerLibrary.url` + path component `"containers"` + path
+  extension `"sqlite3"` (strings at `0x1c4d25e7c` = `containers`,
+  `0x1c4d25e87` = `sqlite3`). `containers.sqlite3` is **not** in the source
+  image; `/private/var/installd` exists but is empty, so the DB and its
+  directory are created at runtime.
+- **The `err_advlock`/WAL hypothesis is RULED OUT.** Although
+  `hfs_vnodeop_entries` maps `VNOP_ADVLOCK` to `err_advlock`
+  (`bsd/sweet_hfs/core/hfs_vnops.c:7400`; `err_advlock` returns `ENOTSUP`),
+  `hfs_mountfs` already calls `vfs_setlocklocal(mp)` at
+  `bsd/sweet_hfs/core/hfs_vfsops.c:1132`, before any vnode is created. That
+  sets `MNTK_LOCK_LOCAL`, and `insmntque` sets `VLOCKLOCAL` on every vnode;
+  `VNOP_ADVLOCK` then calls `lf_advlock()` at the VFS layer and never reaches
+  the filesystem's `err_advlock`. Confirmed in the 0155 kernel binary:
+  `hfs_mountfs` at `0xfffffff0077898e0` has `cbz x19, ...; mov x0, x19; bl
+  0xfffffff0074d6d90` (`vfs_setlocklocal`) at `+0x94`, and the symbol table
+  maps `_vfs_setlocklocal` to `0xfffffff0074d6d90`. So SQLite advisory locks
+  should work; do **not** add a no-op `nop_advlock` or a redundant HFS
+  `lf_advlock` vnop without new evidence.
+- **The HFS inconsistency is after the first crash.** The first
+  containermanagerd SIGTRAP is at log line 1443; `hfs:
+  BlockMarkFreeInternal() trying to free unallocated blocks on volume iOSRoot
+  <3112964, 1>` and `hfs_mark_inconsistent: Runtime corruption detected on
+  iOSRoot, fsck will be forced on next mount` are at lines 1657-1658, after
+  the first crash (though before later restarts). So the volume inconsistency
+  cannot explain the first SQLite exec failure, but it may affect later
+  restarts. The journal replay at mount still reports
+  `bad block list header @ 0x408200 (checksum 0xffffffff != 0x1a4ed8d)`,
+  restarts, and completes. 26 `jnl: b(1, 0): flushing fs disk buffer returned
+  0x19` (`ENOTTY`) lines remain; `santoni_sdhci_ioctl` still lacks
+  `DKIOCSYNCHRONIZE`.
+- **Diagnostic image for the SQLite error built:**
+  `shim-boot-realroot-0155-scan.img` SHA-256 `79ec9c54…`, payload
+  `payload-realroot-0155-scan.bin` `8e3b10c7…`, same 0155 kernel
+  (`7a9b036b…`) and unchanged shim half. Cmdline is the sweetlog cmdline plus
+  `sweetscan=containermanager` (the process name is the 16-char `p_comm`
+  truncation `containermanager`, not `containermanagerd`). The kernel's
+  `sweet_crash_strings()` scans the crashing process's malloc heap for
+  printable runs >=24 chars with >=2 spaces and prints `STR ...` lines at
+  each SIGTRAP. Next: user boots this image (non-destructive), lets the crash
+  loop run, then pulls the ring from recovery and checks for
+  `STR scan of containermanager heap` plus the SQLite error text
+  (`database disk image is malformed`, `unable to open database file`,
+  `disk I/O error`, `attempt to write a readonly database`, etc.). If the
+  heap scan misses the freed `sqlite3_exec` error message, the fallback is a
+  targeted 0156 diagnostic that dumps the crash stack: `[sp+0x20]` is the
+  `sqlite3_exec` `errmsg` pointer, `[sp+0x30]` is the
+  `"Failed to initialize database, err = %d, xerr = %x"` buffer, and `x22`
+  is the exec return code at the trap.
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 
