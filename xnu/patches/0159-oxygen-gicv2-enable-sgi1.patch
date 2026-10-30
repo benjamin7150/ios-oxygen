@@ -1,0 +1,38 @@
+diff --git a/pexpert/arm/pe_fiq.c b/pexpert/arm/pe_fiq.c
+--- a/pexpert/arm/pe_fiq.c
++++ b/pexpert/arm/pe_fiq.c
+@@ -252,6 +252,14 @@
+ 				for (uint32_t i = 8; i < it_lines * 8; i++) {
+ 					*(volatile uint32_t *)(gicd + 0x800 + (i * 4)) = 0x01010101;
+ 				}
++				/*
++				 * GICD_ISENABLER0 is banked per CPU interface. A freshly
++				 * powered-on secondary resets its bank to zero, so SGI1
++				 * must be enabled here or the self-IPI from initCPU() is
++				 * dropped and SweetCPU::startAll() times out. ISENABLER
++				 * is write-1-to-set, so both writes are safe.
++				 */
++				*(volatile uint32_t *)(gicd + 0x100) = (1U << SWEET_IPI_SGI);
+ 				*(volatile uint32_t *)(gicd + 0x100 + (sweet_vtimer_intid / 32) * 4) = (1U << (sweet_vtimer_intid % 32));
+ 				*(volatile uint32_t *)(gicc_base + 0x004) = 0xff;
+ 				*(volatile uint32_t *)(gicc_base + 0x008) = 0x00;
+diff --git a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -171,9 +171,13 @@
+ 		while (__atomic_load_n(&cpu->initialized, __ATOMIC_ACQUIRE) == 0 ||
+ 		    !sweet_cpu_signal_is_enabled(i)) {
+ 			if (mach_absolute_time() > deadline) {
+-				IOLog("SWEET CPU: cpu=%u mpidr=0x%x NOT alive after 5s\n",
+-				    i, topology->cpus[i].phys_id);
+-				panic("SWEET CPU: cpu=%u startup timeout (reset/MMU/GIC/SGI)", i);
++				uint32_t reached = __atomic_load_n(&cpu->initialized, __ATOMIC_ACQUIRE);
++				boolean_t signal_ok = sweet_cpu_signal_is_enabled(i);
++				IOLog("SWEET CPU: cpu=%u mpidr=0x%x NOT alive after 5s"
++				    " (initCPU=%u SGI-cleared=%u)\n",
++				    i, topology->cpus[i].phys_id, reached, signal_ok);
++				panic("SWEET CPU: cpu=%u startup timeout (reset/MMU/GIC/SGI)"
++				    " initCPU=%u SGI-cleared=%u", i, reached, signal_ok);
+ 			}
+ 			IOSleep(1);
+ 		}

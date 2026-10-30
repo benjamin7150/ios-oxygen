@@ -27,6 +27,7 @@ P147="xnu/patches/0147-oxygen-sweet-boot-cpu.patch"
 P148="xnu/patches/0148-sweet-hfs-sysctl-macros.patch"
 P155="xnu/patches/0155-santoni-sdhci-bounce-race.patch"
 P156="xnu/patches/0156-sweet-boot-rm-corrupt-db.patch"
+P159="xnu/patches/0159-oxygen-gicv2-enable-sgi1.patch"
 
 echo "== host unit tests (-Wall -Wextra) =="
 for t in test_sdhci_mock test_gpt_parser test_log_ring; do
@@ -362,6 +363,16 @@ print("ok   oxygen starts with 0x0, santoni with 0x100; others stopped")
 PY
 rm -rf "$tmpadt"
 echo "ok   mkadt.py board CPU order supports cpus=8 on oxygen"
+
+echo "== OXY-09: a powered-on secondary enables its banked SGI1 before the =="
+echo "==          self-IPI, and a timeout says whether initCPU was reached  =="
+python3 tools/check_patch.py "$P159" -q \
+	--added-contains 'pexpert/arm/pe_fiq.c:GICD_ISENABLER0 is banked per CPU interface' \
+	--added-contains 'pexpert/arm/pe_fiq.c:*(volatile uint32_t *)(gicd + 0x100) = (1U << SWEET_IPI_SGI);' \
+	--added-contains 'iokit/Kernel/arm/SweetCPU.cpp:boolean_t signal_ok = sweet_cpu_signal_is_enabled(i);' \
+	--added-contains 'iokit/Kernel/arm/SweetCPU.cpp:initCPU=%u SGI-cleared=%u' \
+	--added-contains 'iokit/Kernel/arm/SweetCPU.cpp:panic("SWEET CPU: cpu=%u startup timeout (reset/MMU/GIC/SGI)"'
+echo "ok   0159 enables SGI1 in each CPU bank and reports initCPU/SGI state"
 
 echo "== CI-01: Xcode 16 iig expects the kernel-side IORPC.kernelContent field (0146) =="
 python3 tools/check_patch.py "$P146" -q \
