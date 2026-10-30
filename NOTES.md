@@ -816,10 +816,45 @@
   `sweetlog=1`), ADT `oxygen-8core.adt`
   `8ff483847a0f1a685d0b75470dfdc261a6443c53285e4fe035c7589d0c8ba209`.
   Embedded ADT verified: cpu0 `0x0 running`, cpu1-3 `0x1-0x3`, cpu4-7
-  `0x100-0x103`, all stopped. Untested on oxygen hardware; expected log
+  `0x100-0x103`, all stopped. Expected log
   `SWEET CPU: requested=8 selected=8`, `cpu=1..7 ... came alive; SGI1 OK`,
   `8/8 CPUs initialized`. A secondary failure panics with
   `SWEET CPU: cpu=N startup timeout`, leaving 0158b as fallback.
+- **8-core result: `cpu=1 startup timeout` (2026-10-30).** The user booted
+  the 8-core image; the photographed panic is
+  `panic(cpu 0 ...): SWEET CPU: cpu=1 startup timeout (reset/MMU/GIC/SGI)
+  @SweetCPU.cpp:176`, preceded by seven `cpu_signal failed in
+  DebuggerXCallEnter` lines. PSCI CPU_ON returned success (no
+  `PSCI CPU_ON rc=` panic), so `0x1` was powered on but its handshake never
+  completed. The boot core passed because ABL had already left SGI1 enabled
+  in its banked `GICD_ISENABLER0`; a freshly powered-on secondary resets its
+  bank to zero. `pe_init_fiq()` only enabled the virtual-timer PPI there, so
+  the self-IPI raised by `initCPU()` was dropped and `SIGPdisabled` never
+  cleared. Kernel patch
+  `0159-oxygen-gicv2-enable-sgi1.patch` writes `1U << SWEET_IPI_SGI` to
+  `GICD_ISENABLER0` on every CPU (write-1-to-set, so the vtimer bit is
+  unaffected). The same patch makes the timeout panic print
+  `initCPU=%u SGI-cleared=%u`: `initCPU=0` means the secondary never reached
+  C code (reset/MMU), `initCPU=1 SGI-cleared=0` means the self-IPI was
+  still lost (GIC enable/priority). Host test `OXY-09` asserts both.
+- **CI runner note (2026-10-30):** the `macos-14` label now cancels a
+  dispatched job within ~2 s (GitHub retired the image); dispatch with
+  `runner=macos-15-intel` instead. The last successful 0158 build also used
+  `macos-15-intel`.
+- **0159 kernel + 0160 image (2026-10-30):** CI run `41116130700` passed in
+  11m30s (OXYGEN / DEVELOPMENT / macos-15-intel). Kernel
+  `artifact-0159/kernel.development.oxygen` SHA-256
+  `3d924fd4efc5e34b1726a8ad403222c53f7ba3be1a1401170aa11a6e3bc60271`
+  (17,315,768 B). Rebuilt image `shim-boot-realroot-0160-8core.img`
+  SHA-256 `320b8343a349cedf8e8df4af9fdbb2c1827ed8db4e80480641e396508287eec0`
+  (17,176,576 B), payload `payload-realroot-0160.bin`
+  `c7117a7a61bb0e9243c9091bfd4dfc8f034b60ef3077b1a5f13371bebba745b5`
+  (16,723,712 B), same `oxygen-8core.adt`
+  (`8ff48384…`) and `realroot-cmdline-0159.txt` (`cpus=8`, 30 Hz,
+  `sweetlog=1`). Verified: boot-header and payload cmdlines equal the file,
+  ADT order/states unchanged, and the new `SGI-cleared=` panic string plus
+  the kernel's first 4 KiB are present in the payload (so the fix is really
+  in the image).
 - **GICv2 target-numbering risk (unverified):** the boot handshake only
   exercises the self-SGI (`GICD_SGIR` filter 2). Cross-core IPIs
   (`SweetCPU::signalCPU`) use target-list bit `1 << logical`. Santoni's
@@ -831,12 +866,15 @@
   happens, the fallback is to derive the target bit from the live mapping
   or broadcast with the "all others" filter.
 - **Next action (needs the user's phone):** boot
-  `fastboot boot /home/moron/ios/oxygen-0148/shim-boot-realroot-0159-8core.img`
-  (fallback `shim-boot-realroot-0158b-30hz.img`) and let it run. Both now
-  carry `sweetlog=1`, so the SYSTEM ring will finally contain this boot.
-  After the run (or after a panic/reset), enter TWRP and pull
-  `/tmp/opencode/sweetlog-0159.txt` with
-  `ANDROID_SERIAL='Red_Wolf_(29d84c95)' /home/moron/ios/ios-santoni/tools/sweet-log-pull.sh /tmp/opencode/sweetlog-0159.txt`;
+  `fastboot boot /home/moron/ios/oxygen-0148/shim-boot-realroot-0160-8core.img`
+  (fallback `shim-boot-realroot-0158b-30hz.img`) and let it run. Both carry
+  `sweetlog=1`, so the SYSTEM ring will contain this boot. If it panics,
+  photograph the screen: the new panic text ends with `initCPU=0`
+  (secondary never reached C code: reset/MMU) or `initCPU=1 SGI-cleared=0`
+  (self-IPI still lost: GIC bank/priority). After the run (or after a
+  panic/reset), enter TWRP and pull
+  `/tmp/opencode/sweetlog-0160.txt` with
+  `ANDROID_SERIAL='Red_Wolf_(29d84c95)' /home/moron/ios/ios-santoni/tools/sweet-log-pull.sh /tmp/opencode/sweetlog-0160.txt`;
   check `SWEET FB: BGR24 panel`, `SWEET CPU: requested=8 selected=8`,
   `cpu=1..7 ... came alive; SGI1 OK`, `8/8 CPUs initialized`,
   `exec com.apple.datamigrator`, and any crash loop.
