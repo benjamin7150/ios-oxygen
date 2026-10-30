@@ -1,0 +1,120 @@
+diff --git a/bsd/dev/santoni_sdhci.c b/bsd/dev/santoni_sdhci.c
+--- a/bsd/dev/santoni_sdhci.c
++++ b/bsd/dev/santoni_sdhci.c
+@@ -2348,6 +2348,8 @@
+ {
+ 	int error = 0;
+ 	caddr_t vaddr = NULL;
++	vm_offset_t user_bounce = 0;
++	vm_size_t user_bounce_size = 0;
+ 	uint64_t off = (uint64_t)buf_blkno(bp) * se.secsize;
+ 	uint32_t count = buf_count(bp);
+ 	uint64_t part_bytes = se.nblocks * SDHCI_BLOCK;
+@@ -2384,49 +2386,78 @@
+ 	user = (buf_flags(bp) & B_PHYS) != 0 &&
+ 	    !santoni_kernel_address(vaddr);
+ 
++	/*
++	 * Kernel buffers share se.dma + DMA_BOUNCE.  Keep the lock across the
++	 * PIO and the memcpy(): otherwise another strategy call or the console
++	 * log flusher can overwrite the bounce buffer between the read and the
++	 * copy, and the destination page ends up with another block's data
++	 * (observed as unstable executable __TEXT pages and HFS B-tree
++	 * corruption).  User buffers get a private bounce so copyin()/copyout()
++	 * can run without the lock; a user fault may page in through this
++	 * filesystem and re-enter the driver.
++	 */
++	if (user) {
++		user_bounce_size = (vm_size_t)MIN((uint64_t)count + SDHCI_BLOCK,
++		    (uint64_t)BOUNCE_SIZE);
++		user_bounce_size = roundup(user_bounce_size, SDHCI_BLOCK);
++		if (kmem_alloc(kernel_map, &user_bounce, user_bounce_size,
++		    KMA_DATA, VM_KERN_MEMORY_BSD) != KERN_SUCCESS) {
++			error = ENOMEM;
++			goto unmap;
++		}
++	}
++
+ 	for (uint32_t done = 0; done < count;) {
+ 		uint64_t pos = off + done;
+ 		uint64_t lba = pos / SDHCI_BLOCK;
+ 		uint32_t skip = (uint32_t)(pos % SDHCI_BLOCK);
+ 		uint32_t want = MIN(count - done, (uint32_t)BOUNCE_SIZE - skip);
+ 		uint32_t blocks = (skip + want + SDHCI_BLOCK - 1) / SDHCI_BLOCK;
+-		char *bounce = (char *)(se.dma + DMA_BOUNCE);
++		char *bounce = user ? (char *)user_bounce :
++		    (char *)(se.dma + DMA_BOUNCE);
+ 
+ 		if (rd) {
+ 			lck_mtx_lock(&santoni_sdhci_lock);
+ 			error = santoni_sdhci_read_blocks(se.first_block + lba,
+ 			    blocks, bounce);
++			if (!error && !user) {
++				memcpy(vaddr + done, bounce + skip, want);
++			}
+ 			lck_mtx_unlock(&santoni_sdhci_lock);
+-			if (!error) {
+-				if (user) {
+-					error = copyout(bounce + skip,
+-					    (user_addr_t)(vaddr + done), want);
+-				} else {
+-					memcpy(vaddr + done, bounce + skip, want);
+-				}
++			if (!error && user) {
++				error = copyout(bounce + skip,
++				    (user_addr_t)(vaddr + done), want);
+ 			}
+-		} else {
++		} else if (user) {
+ 			if (skip || (want % SDHCI_BLOCK)) {
+ 				lck_mtx_lock(&santoni_sdhci_lock);
+-				error = santoni_sdhci_read_blocks(se.first_block + lba,
+-				    blocks, bounce);
++				error = santoni_sdhci_read_blocks(
++				    se.first_block + lba, blocks, bounce);
+ 				lck_mtx_unlock(&santoni_sdhci_lock);
+ 				if (error) {
+ 					break;
+ 				}
+ 			}
+-			if (user) {
+-				error = copyin((user_addr_t)(vaddr + done),
+-				    bounce + skip, want);
+-			} else {
+-				memcpy(bounce + skip, vaddr + done, want);
+-			}
++			error = copyin((user_addr_t)(vaddr + done),
++			    bounce + skip, want);
+ 			if (!error) {
+ 				lck_mtx_lock(&santoni_sdhci_lock);
+ 				error = santoni_sdhci_write_blocks(
+ 				    se.first_block + lba, blocks, bounce);
+ 				lck_mtx_unlock(&santoni_sdhci_lock);
+ 			}
++		} else {
++			lck_mtx_lock(&santoni_sdhci_lock);
++			if (skip || (want % SDHCI_BLOCK)) {
++				error = santoni_sdhci_read_blocks(
++				    se.first_block + lba, blocks, bounce);
++			}
++			if (!error) {
++				memcpy(bounce + skip, vaddr + done, want);
++				error = santoni_sdhci_write_blocks(
++				    se.first_block + lba, blocks, bounce);
++			}
++			lck_mtx_unlock(&santoni_sdhci_lock);
+ 		}
+ 		if (error) {
+ 			break;
+@@ -2434,6 +2465,11 @@
+ 		done += want;
+ 		buf_setresid(bp, count - done);
+ 	}
++
++	if (user_bounce) {
++		kmem_free(kernel_map, user_bounce, user_bounce_size);
++	}
++unmap:
+ 	buf_unmap(bp);
+ 
+ done:

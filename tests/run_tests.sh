@@ -25,6 +25,7 @@ P145="xnu/patches/0145-oxygen-board-target.patch"
 P146="xnu/patches/0146-iig-kernelcontent.patch"
 P147="xnu/patches/0147-oxygen-sweet-boot-cpu.patch"
 P148="xnu/patches/0148-sweet-hfs-sysctl-macros.patch"
+P155="xnu/patches/0155-santoni-sdhci-bounce-race.patch"
 
 echo "== host unit tests (-Wall -Wextra) =="
 for t in test_sdhci_mock test_gpt_parser test_log_ring; do
@@ -300,6 +301,20 @@ python3 tools/check_patch.py "$P148" -q \
 python3 tools/check_patch.py xnu/patches/0026-sweet-builtin-hfs.patch -q \
 	--added-contains 'bsd/sweet_hfs/sweet_hfs_iokit.c:hfs_sysctl_register();'
 echo "ok   0148 restores non-permanent OIDs for HFS's late explicit registration"
+
+echo "== OXY-06: strategy() keeps the shared bounce under the lock across  =="
+echo "==          PIO + memcpy, and user buffers get a private bounce (0155) =="
+python3 tools/check_patch.py "$P155" -q \
+	--added-contains 'bsd/dev/santoni_sdhci.c:vm_offset_t user_bounce = 0;' \
+	--added-contains 'bsd/dev/santoni_sdhci.c:user_bounce_size = roundup(user_bounce_size, SDHCI_BLOCK);' \
+	--added-contains 'bsd/dev/santoni_sdhci.c:kmem_alloc(kernel_map, &user_bounce, user_bounce_size,' \
+	--added-contains 'bsd/dev/santoni_sdhci.c:char *bounce = user ? (char *)user_bounce :' \
+	--added-contains 'bsd/dev/santoni_sdhci.c:if (!error && !user) {' \
+	--added-contains 'bsd/dev/santoni_sdhci.c:memcpy(vaddr + done, bounce + skip, want);' \
+	--added-contains 'bsd/dev/santoni_sdhci.c:memcpy(bounce + skip, vaddr + done, want);' \
+	--added-contains 'bsd/dev/santoni_sdhci.c:kmem_free(kernel_map, user_bounce, user_bounce_size);' \
+	--added-lacks 'bsd/dev/santoni_sdhci.c:char *bounce = (char *)(se.dma + DMA_BOUNCE);'
+echo "ok   0155 serializes shared-bounce PIO+copy and isolates user copyin/copyout"
 
 echo "== CI-01: Xcode 16 iig expects the kernel-side IORPC.kernelContent field (0146) =="
 python3 tools/check_patch.py "$P146" -q \
