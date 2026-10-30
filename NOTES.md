@@ -438,12 +438,63 @@
   `shim-boot-realroot-sweetlog.img.OLD-0148`). Both keep the unchanged 450471 B
   shim kernel half. `rebuild-realroot.sh` now accepts `CMDLINE_FILE`, `OUT_IMG`,
   `PAYLOAD`, `SOURCE_IMG` overrides.
-- **Next:** boot `shim-boot-realroot-csdebug.img` (userdata unchanged) and read
-  the `CODESIGNING: vm_page_validate_cs_fast ... was modified` / `vm_fault:
-  signed: ... tainted: ... wpmapped: ...` lines above the crash; or boot the
-  sweetlog image and pull the 4 MiB ring via recovery. That decides between
-  the wpmapped-taint path (then exempt shared-cache/kernel-slid pages or honor
-  `cs_enforcement_disable` before taint) and a hash/no-hash path.
+- **Sweetlog evidence (2026-10-30): the crash loop is a runtime I/O race, not
+  image corruption.** Booted the `sweetlog=1 cs_debug=6` image and pulled
+  SYSTEM's first 8193 sectors (`mmcblk0p65`) with
+  `ANDROID_SERIAL='Red_Wolf_(29d84c95)' adb exec-out "dd if=/dev/block/mmcblk0p65
+  bs=512 count=8193 2>/dev/null"`; the ring is a valid `SANTONILOG1` v1,
+  4 MiB, 119658 bytes, flush 78, decoded to
+  `/tmp/opencode/sweetlog-0154.txt` (2075 lines). All 19 `vm_fault` lines are
+  `signed: yes validate: yes tainted: yes wpmapped: no prot: 0x5`; the
+  mismatches are low-address main-executable `__TEXT` pages (thermalmonitord
+  mobj `0xfffffff629fcde20` off `0x61000`; ptpd off `0x3d000`; nfcd off
+  `0x9d000`; seserviced off `0x178000`/`0x179000`). The same thermalmonitord
+  page/mobj hashes differently across validations: first actual
+  `ad7facb2586fc6e966c004d7d1d16b024f5805ff` = SHA-256 of a 4096-byte zero
+  page, later `991a55b65025b1b0b563674a24f16c20a75fd568`; expected
+  `c1068a73eb181bb3ef82dd050b376c9fb1f4ce27`.
+- **On-disk pages are correct.** Extracted the actual image's
+  `/usr/libexec/{thermalmonitord,ptpd,nfcd,seserviced}` with 7z; each page at
+  the logged offset is byte-identical to the staging tree and matches its
+  CodeDirectory slot (thermalmonitord idx 97, ptpd idx 61, etc.). The other
+  logged actual digests are not any 4K page in the 7.8 GiB staging tree, the
+  16 GiB root image, or any 512-byte-aligned 4K window in the same binary.
+  So the pages are being corrupted in RAM during read, not on disk.
+- **HFS metadata also corrupted at runtime:** the same log shows
+  `hfs_swap_BTNode: invalid forward link (0xfd7b41a9 >= 0x00005000)`,
+  `node=19454 fileID=4`, then
+  `hfs_mark_inconsistent: Runtime corruption detected on iOSRoot`, after a
+  clean journal replay at mount. That is the same bounce buffer feeding the
+  B-tree reader.
+- **Root cause: `santoni_sdhci_strategy()` releases `santoni_sdhci_lock`
+  between the PIO into `se.dma + DMA_BOUNCE` and the `memcpy()`/`copyout()`
+  out of it.** A concurrent strategy call or the SYSTEM console log flusher
+  can overwrite the 1 MiB shared bounce in that window; the destination page
+  then receives another block's data. The write path also copied into the
+  bounce outside the lock. The old 0142 comment claimed `strategy()` owns the
+  bounce under the lock, but the code did not hold it across the copy.
+- **Fix `0155-santoni-sdhci-bounce-race.patch`:** for kernel buffers hold
+  `santoni_sdhci_lock` across the PIO and the `memcpy()` (read), and across
+  the read-modify-write + `memcpy()` + write (partial write). User B_PHYS
+  buffers get a private `kmem_alloc` bounce (same pattern as
+  `santoni_sdhci_uio`) so `copyin()`/`copyout()` can run without the lock; a
+  user fault may page in through this filesystem and re-enter the driver.
+  Generated against the exact post-`0154` CI source (the CI-uploaded
+  `buildtree.tgz` `santoni_sdhci.c` is byte-identical to the pre-patch file,
+  sha256 `e097a0fd…`); `git apply --check` and `patch -p1 --fuzz=0` both
+  clean; result byte-identical to the intended file (`d25121a8…`).
+  `tests/run_tests.sh` adds **OXY-06** for the lock/bounce structure.
+  Commit `642af20`, pushed to `benjamin7150/ios-oxygen` `ci-x64`.
+- **CI build `41048071461` (headSha `642af20`)** dispatched via
+  `gh workflow run xnu.yml` (OXYGEN / DEVELOPMENT / macos-15-intel).
+  **Next:** verify `0155` was applied (uploaded buildtree `santoni_sdhci.c`
+  matches `d25121a8…`, `check_patch.log` lists it), download the new kernel,
+  rebuild the boot image with `rebuild-realroot.sh`, and have the user boot
+  it. Then pull the sweetlog ring and check that `cs_validate_page`
+  mismatches, zero pages and `hfs_swap_BTNode` corruption are gone. Also
+  fixed `tools/sweet-log-pull.sh` to keep the `system`/`userdata` partition
+  name next to the resolved device path (the old `grep -q system` failed on
+  `/dev/block/mmcblk0p65` and read the wrong range).
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 
