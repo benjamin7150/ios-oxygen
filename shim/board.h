@@ -26,6 +26,17 @@
 #	define FB_BPP		3		/* bytes per pixel, BGR24 */
 #	define FB_STRIDE	(FB_W * FB_BPP)
 
+/*
+ * Boot video handed to XNU. SweetFramebuffer renders 32bpp BGRA and rejects
+ * a boot framebuffer narrower than width*4, so give it a 4-byte-per-pixel
+ * buffer in the unused tail of the 20 MiB cont-splash carve-out
+ * (0x90001000..0x91400000). The ABL panel buffer above stays BGR24 and the
+ * kernel converts each presented frame into it.
+ */
+#	define FB_VIDEO_BASE	0x90800000UL
+#	define FB_VIDEO_BPP	4
+#	define FB_VIDEO_STRIDE	(FB_W * FB_VIDEO_BPP)
+
 /* Kernel-managed RAM: above every Qualcomm carve-out incl. the live splash.
  * Free gap 0x91400000 .. 0xb0000000 (492 MiB) before ramoops@0xb0000000. */
 #	define PHYS_BASE	0x91400000UL
@@ -39,6 +50,11 @@
 #	define FB_H			1280
 #	define FB_BPP		3		/* BGR24 */
 #	define FB_STRIDE	(FB_W * FB_BPP)
+
+/* santoni keeps the old handoff: its display path is still 24bpp only. */
+#	define FB_VIDEO_BASE	FB_BASE
+#	define FB_VIDEO_BPP	FB_BPP
+#	define FB_VIDEO_STRIDE	FB_STRIDE
 
 #	define PHYS_BASE	0x98000000UL
 #	define MEM_SIZE		0x28000000UL	/* 640 MiB safe budget */

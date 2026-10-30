@@ -1,0 +1,242 @@
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -142,9 +142,14 @@
+ public:
+ 	uint64_t      fPhys;
+ 	uint32_t      fWidth, fHeight, fRowBytes;
++	uint64_t      fPanelPhys;       /* BGR24 panel scanout buffer (ABL splash) */
++	uint32_t      fPanelStride;
++	uintptr_t     fPanel;           /* kernel mapping of the panel buffer */
++	bool          fPanelBGR24;
++	SweetSurface *fPanelSurface;
+ 	uint32_t      fLogicalW, fLogicalH;     /* size reported to userland */
+ 	int32_t       fOffX, fOffY;             /* logical origin of the panel */
+-	uintptr_t     fPixels;          /* kernel mapping of the panel memory */
++	uintptr_t     fPixels;          /* kernel mapping of the render memory */
+ 	IOMemoryMap  *fMap;
+ 	SweetSurface *fSurface;         /* the panel memory as an IOSurface */
+ 	IOLock       *fLock;            /* swaps and client list */
+@@ -163,6 +168,7 @@
+ 	uint32_t      fBootSrc, fBootStride;
+ 	bool          directPresent(const uint8_t *rec);
+ 	void          scanFrom(uint64_t pa, uint32_t stride);
++	void          showFrame(const uint8_t *va, uint64_t pa, uint32_t stride);
+ 	uint32_t      fFlushTicks;    /* vsync ticks between panel copies */
+ 	bool          fPowerOff;      /* RequestPowerChange(0) */
+ 	uint32_t      fFadeStep;      /* fade-out steps done while off */
+@@ -270,6 +276,23 @@
+ 	topaz_modem_init();
+ 	sweet_busy_init();
+ 	PE_current_console(&video);
++	fVig0 = NULL;
++	fCtl0 = NULL;
++	fIntf1 = NULL;
++	fDsi = NULL;
++	fDsiBuf = NULL;
++	fDsiBufPhys = 0;
++	fPanelSurface = NULL;
++	fPanel = 0;
++	fPanelPhys = 0;
++	fPanelStride = 0;
++#if defined(OXYGEN)
++	int panelBgr24 = 1;
++#else
++	int panelBgr24 = 0;
++#endif
++	PE_parse_boot_argn("sweetfb_panel_bgr24", &panelBgr24, sizeof(panelBgr24));
++	fPanelBGR24 = panelBgr24 != 0;
+ 	fPhys = video.v_baseAddr;
+ 	fWidth = (uint32_t)video.v_width;
+ 	fHeight = (uint32_t)video.v_height;
+@@ -278,6 +301,24 @@
+ 		IOLog("SWEET FB: no boot framebuffer\n");
+ 		return false;
+ 	}
++	if (fPanelBGR24) {
++		/*
++		 * oxygen: the ABL continuous splash is packed BGR24 and the panel
++		 * keeps scanning it. The boot video buffer above is a separate
++		 * 32bpp BGRA render buffer; convert each frame into the splash.
++		 */
++		fPanelPhys = 0x90001000ULL;     /* board.h FB_BASE */
++		fPanelStride = fWidth * 3;
++		fPanelSurface = sweet_surface_create_physical(fPanelPhys, fWidth, fHeight,
++		    fPanelStride, SWEET_FB_FORMAT_BGRA);
++		fPanel = fPanelSurface != NULL ? fPanelSurface->kernelAddress() : 0;
++		if (fPanel == 0) {
++			IOLog("SWEET FB: no BGR24 panel mapping\n");
++			return false;
++		}
++		IOLog("SWEET FB: BGR24 panel %ux%u stride %u at 0x%llx\n",
++		    fWidth, fHeight, fPanelStride, fPanelPhys);
++	}
+ 	int native = 0;
+ 	PE_parse_boot_argn("sweetfb_native", &native, sizeof(native));
+ 	fLogicalW = fWidth;
+@@ -305,17 +346,19 @@
+ 		IOLog("SWEET FB: no vsync timer\n");
+ 		return false;
+ 	}
+-	fVig0 = (volatile uint32_t *)ml_io_map(0x05e05000, 0x1000);
+-	fCtl0 = (volatile uint32_t *)ml_io_map(0x05e02000, 0x1000);
+-	fDsi = (volatile uint8_t *)ml_io_map(0x05e94000, 0x1000);
+-	fDsiBuf = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task,
+-	    kIODirectionInOut | kIOMemoryPhysicallyContiguous, page_size, 0x00000000fffff000ull);
+-	fDsiBufPhys = fDsiBuf ? fDsiBuf->getPhysicalSegment(0, NULL, kIOMemoryMapperNone) : 0;
+ 	fBlLock = IOLockAlloc();
+ 	fBlLevel = 0x133;                       /* panel init level (stock DT) */
+ 	fBlSent = ~0u;
+ 	fBlCall = thread_call_allocate(&AppleCLCD::blWork, this);
+-	if (fDsi != NULL) {
++	if (!fPanelBGR24) {
++		fVig0 = (volatile uint32_t *)ml_io_map(0x05e05000, 0x1000);
++		fCtl0 = (volatile uint32_t *)ml_io_map(0x05e02000, 0x1000);
++		fDsi = (volatile uint8_t *)ml_io_map(0x05e94000, 0x1000);
++		fDsiBuf = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task,
++		    kIODirectionInOut | kIOMemoryPhysicallyContiguous, page_size, 0x00000000fffff000ull);
++		fDsiBufPhys = fDsiBuf ? fDsiBuf->getPhysicalSegment(0, NULL, kIOMemoryMapperNone) : 0;
++	}
++	if (!fPanelBGR24 && fDsi != NULL) {
+ 		IOLog("SWEET FB: DSI0 ctrl %#x, brightness via DCS 0x51\n", *(volatile uint32_t *)(fDsi + 0x004));
+ 		setProperty("IOMFBBrightnessLevel", (unsigned long long)(200u << 16), 32);
+ 		/*
+@@ -349,16 +392,18 @@
+ 		}
+ 	}
+ 	OSSafeReleaseNULL(accel);
+-	/* dpu sm6115 catalog: intf_1 at mdp+0x6a800, mdp at 0x5e01000 */
+-	fIntf1 = (volatile uint32_t *)ml_io_map(0x05e6b000, 0x1000);
+-	if (fIntf1 != NULL) {
+-		volatile uint32_t *r = fIntf1 + 0x800 / 4;
+-		r[0x0a8 / 4] = 0x3;     /* FRAME_LINE_COUNT_EN */
+-		IOLog("SWEET INTF1: te_en %#x config %#x hsync %#x vsync_period %#x hctl %#x active_hctl %#x vstart %#x vend %#x fmt %#x cmd_trig %#x\n",
+-		    r[0x000 / 4], r[0x004 / 4], r[0x008 / 4], r[0x00c / 4], r[0x03c / 4], r[0x040 / 4],
+-		    r[0x01c / 4], r[0x024 / 4], r[0x090 / 4], r[0x084 / 4]);
++	if (!fPanelBGR24) {
++		/* dpu sm6115 catalog: intf_1 at mdp+0x6a800, mdp at 0x5e01000 */
++		fIntf1 = (volatile uint32_t *)ml_io_map(0x05e6b000, 0x1000);
++		if (fIntf1 != NULL) {
++			volatile uint32_t *r = fIntf1 + 0x800 / 4;
++			r[0x0a8 / 4] = 0x3;     /* FRAME_LINE_COUNT_EN */
++			IOLog("SWEET INTF1: te_en %#x config %#x hsync %#x vsync_period %#x hctl %#x active_hctl %#x vstart %#x vend %#x fmt %#x cmd_trig %#x\n",
++			    r[0x000 / 4], r[0x004 / 4], r[0x008 / 4], r[0x00c / 4], r[0x03c / 4], r[0x040 / 4],
++			    r[0x01c / 4], r[0x024 / 4], r[0x090 / 4], r[0x084 / 4]);
++		}
+ 	}
+-	if (fVig0 != NULL && fCtl0 != NULL) {
++	if (!fPanelBGR24 && fVig0 != NULL && fCtl0 != NULL) {
+ 		fBootSrc = fVig0[0x14 / 4];
+ 		fBootStride = fVig0[0x24 / 4];
+ 		fScanPhys = fBootSrc;
+@@ -366,6 +411,8 @@
+ 		IOLog("SWEET FB: MDP VIG0 src %#x stride %u (boot), direct scanout ready\n",
+ 		    fBootSrc, fBootStride);
+ 		sweet_scanout_set_geometry(fWidth, fHeight, fLogicalW, fLogicalH);
++	}
++	if (fPanelBGR24 || (fVig0 != NULL && fCtl0 != NULL)) {
+ 		vm_size_t fsz = (vm_size_t)fRowBytes * fHeight;
+ 		for (int i = 0; i < 2; i++) {
+ 			fFlip[i] = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task,
+@@ -450,7 +497,8 @@
+ 			if (step <= SWEET_FB_FADE_STEPS) {
+ 				fb->fFadeStep = step + 1;
+ 			}
+-			bool front = fb->fFlip[0] != NULL && fb->fScanPhys == fb->fFlipPhys[fb->fFlipIdx];
++			bool front = fb->fFlip[0] != NULL &&
++			    (fb->fPanelBGR24 || fb->fScanPhys == fb->fFlipPhys[fb->fFlipIdx]);
+ 			const uint8_t *src = front ? (const uint8_t *)fb->fFlip[fb->fFlipIdx]->getBytesNoCopy() :
+ 			    fb->fLastVA ? fb->fLastVA :
+ 			    fb->fConsShown ?
+@@ -579,6 +627,9 @@
+ void
+ AppleCLCD::scanFrom(uint64_t pa, uint32_t stride)
+ {
++	if (fVig0 == NULL || fCtl0 == NULL) {
++		return;
++	}
+ 	fVig0[0x14 / 4] = (uint32_t)pa;
+ 	fVig0[0x24 / 4] = stride;
+ 	__asm__ volatile("dsb sy" ::: "memory");
+@@ -589,6 +640,36 @@
+ }
+ 
+ /*
++ * oxygen: the panel keeps scanning the ABL BGR24 buffer, so present a 32bpp
++ * BGRA frame by converting it in place (one 32-bit store per pixel; the extra
++ * byte is the next pixel's blue and is overwritten immediately).
++ */
++void
++AppleCLCD::showFrame(const uint8_t *va, uint64_t pa, uint32_t stride)
++{
++	if (!fPanelBGR24) {
++		scanFrom(pa, stride);
++		return;
++	}
++	if (fPanel == 0 || va == NULL) {
++		return;
++	}
++	for (uint32_t y = 0; y < fHeight; y++) {
++		const uint32_t *in = (const uint32_t *)(va + (uint64_t)y * stride);
++		uint8_t *out = (uint8_t *)(fPanel + (uint64_t)y * fPanelStride);
++		uint32_t x = 0;
++		for (; x + 1 < fWidth; x++) {
++			*(uint32_t *)(out + 3 * x) = in[x] & 0x00ffffffu;
++		}
++		uint32_t p = in[x];
++		out[3 * x + 0] = (uint8_t)p;
++		out[3 * x + 1] = (uint8_t)(p >> 8);
++		out[3 * x + 2] = (uint8_t)(p >> 16);
++	}
++	__asm__ volatile("dsb sy" ::: "memory");
++}
++
++/*
+  * DCS long write through the DSI command DMA path (topaz-woa: the TPG FIFO
+  * path is a no-op on this DSI 2.4.1). The packet lives in a contiguous
+  * buffer below 4 GiB; header = word count, data type 0x39, flags last|long.
+@@ -777,7 +858,15 @@
+ sweet_cons_show(void)
+ {
+ 	AppleCLCD *fb = sweet_cons_fb;
+-	if (fb != NULL && fb->fVig0 != NULL && fb->fScanPhys != fb->fConsPhys) {
++	if (fb == NULL) {
++		return;
++	}
++	if (fb->fPanelBGR24) {
++		if (fb->fCons != NULL) {
++			fb->showFrame((const uint8_t *)fb->fCons->getBytesNoCopy(),
++			    fb->fConsPhys, fb->fRowBytes);
++		}
++	} else if (fb->fVig0 != NULL && fb->fScanPhys != fb->fConsPhys) {
+ 		fb->scanFrom(fb->fConsPhys, fb->fRowBytes);
+ 	}
+ }
+@@ -814,7 +903,7 @@
+ {
+ 	uint32_t idx = fFlipIdx ^ 1;
+ 	sweet_dcache_clean((vm_offset_t)(uintptr_t)fFlip[idx]->getBytesNoCopy(), (unsigned)fFlip[idx]->getLength());
+-	scanFrom(fFlipPhys[idx], fRowBytes);
++	showFrame((const uint8_t *)fFlip[idx]->getBytesNoCopy(), fFlipPhys[idx], fRowBytes);
+ 	fFlipIdx = idx;
+ }
+ 
+@@ -880,7 +969,8 @@
+ 					    s->bytesPerRow);
+ 				} else {
+ 					sweet_dcache_clean((vm_offset_t)(va + s->offset + (uint64_t)oy * s->bytesPerRow), (unsigned)((uint64_t)fHeight * s->bytesPerRow));
+-					scanFrom(pa, s->bytesPerRow);
++					showFrame((const uint8_t *)(va + s->offset + (uint64_t)oy * s->bytesPerRow),
++					    pa, s->bytesPerRow);
+ 				}
+ 				ok = true;
+ 				IOLockLock(fLock);
+@@ -1028,6 +1118,8 @@
+ 	}
+ 	if (fFlip[0] != NULL) {
+ 		flipBack();
++	} else if (fPanelBGR24) {
++		showFrame((const uint8_t *)fPixels, fPhys, fRowBytes);
+ 	}
+ }
+ 
