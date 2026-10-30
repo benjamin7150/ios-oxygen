@@ -595,6 +595,45 @@
   `sqlite3_exec` `errmsg` pointer, `[sp+0x30]` is the
   `"Failed to initialize database, err = %d, xerr = %x"` buffer, and `x22`
   is the exec return code at the trap.
+- **Scan result (2026-10-30): `SQLITE_NOTADB`, not a locking/WAL failure.**
+  The user booted `shim-boot-realroot-0155-scan.img` and pulled
+  `/tmp/opencode/sweetlog-0155-scan.txt` (1076 lines; 12 containermanagerd
+  SIGTRAPs, each with a heap scan). Every scan contains:
+  `STR file is not a database in "PRAGMA journal_mode = WAL;PRAGMA
+  foreign_keys = ON;PRAGMA auto_vacuum = FULL;CREATE TABLE IF NOT EXISTS
+  code_signing_info(id INTEGER ..."`.
+  So `sqlite3_exec` returns `SQLITE_NOTADB` (26): the existing
+  `<containermanagerLibrary>/containers.sqlite3` file has an invalid SQLite
+  header. This is exactly the kind of file corruption the 0154 SDHCI bounce
+  race could produce; 0155 prevents new corruption but does not repair the
+  already-corrupt DB. The advisory-lock/WAL theory is definitively dead.
+- **The DB path is**
+  `/private/var/installd/Library/Caches/com.apple.containermanagerd/containers.sqlite3`
+  (`/private/var/installd/Library/Caches/com.apple.containermanagerd` is the
+  `containermanagerLibrary` string at `0x1fd21e9`; `containers` and `sqlite3`
+  are appended by `MCMCodeSigningMapping`). The `-wal` and `-shm` siblings
+  should be removed/renamed with it.
+- **HFS state on this boot:** journal replay
+  `from: 6149632 to: 7697408 (joffset 0x82000)` completed; 26
+  `jnl: b(1, 0): flushing fs disk buffer returned 0x19` lines remain. The
+  old `BlockMarkFreeInternal <3112964, 1>` is gone on this boot, but later
+  containermanagerd restarts trigger
+  `hfs: cat_delete() failed to delete thread record id=322613 on vol=iOSRoot`
+  and `hfs_mark_inconsistent: Failed to complete operation; volume 'iOSRoot'
+  might be inconsistent; fsck will be forced on next mount.` That is a
+  catalog/thread-record deletion failure, probably a consequence of the
+  crash-loop cleanup, not the SQLite root cause. The root volume is allowed
+  to mount read-write while inconsistent (`hfs_mountfs` only rejects
+  inconsistent *non-root* volumes).
+- **Repair plan:** a one-shot 0156 diagnostic boot arg (e.g. `sweetrm=`) that
+  calls `unlink1(vfs_context_kernel(), NULLVP, path, UIO_SYSSPACE, 0)` for
+  the three DB files in `bsdinit_task()` immediately before
+  `load_init_program(p)`, so containermanagerd recreates a fresh DB. This is
+  a targeted destructive write to userdata and needs explicit user
+  confirmation; do not reflash `userdata`. A rename-aside variant would
+  preserve the corrupt file for forensics if preferred. After the repair,
+  verify the new `containers.sqlite3` header is `SQLite format 3\0` and that
+  containermanagerd survives.
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 
