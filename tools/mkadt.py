@@ -155,19 +155,25 @@ def build(seed=None, qemu=False, native=False, board=BOARD):
         # with CSR_ALLOW_UNRESTRICTED_FS (vm_unix.c shared region checks).
         node('asmb', [ph(), ('lp-sip0', u64(0x6f)), ('lp-sip1', u32(1))])])
 
-    # Qualcomm MSM8937 Octa-core Cortex-A53
-    # LK boots on Cluster 1 Core 0 (MPIDR 0x100).
-    # XNU and SweetCPU require the boot CPU to be logical CPU 0.
-    # List Cluster 1 (0x100-0x103) as cpu0-cpu3, and Cluster 0 (0x000-0x003) as cpu4-cpu7.
-    cpu_phys_ids = [0x100, 0x101, 0x102, 0x103, 0x000, 0x001, 0x002, 0x003]
+    # Qualcomm Octa-core Cortex-A53. XNU and SweetCPU require the boot CPU to
+    # be logical CPU 0, so the boot cluster is listed first:
+    #   santoni (MSM8937): LK boots on Cluster 1 Core 0 (MPIDR 0x100).
+    #   oxygen  (MSM8953): ABL boots on Cluster 0 Core 0 (MPIDR 0x000).
+    # With cpus=1 the topology parser also reserves the last slot for the boot
+    # CPU, but cpus=8 uses this order directly, so it must match the boot core.
+    if board == 'oxygen':
+        cpu_phys_ids = [0x000, 0x001, 0x002, 0x003, 0x100, 0x101, 0x102, 0x103]
+        default_boot_phys = 0x000
+    else:
+        cpu_phys_ids = [0x100, 0x101, 0x102, 0x103, 0x000, 0x001, 0x002, 0x003]
+        default_boot_phys = 0x100
     cpu_nodes = []
     for i, phys_id in enumerate(cpu_phys_ids):
         cluster = phys_id >> 8
         core = phys_id & 3
         clk = 1401600000 if cluster == 1 else 1094400000
-        # By default, Core 4 (0x100) is marked running because LK boots on the high-performance cluster.
-        # Bare-metal shim loader dynamically updates state based on live MPIDR_EL1.
-        state = 'running' if phys_id == 0x100 else 'stopped'
+        # Default state; the bare-metal shim rewrites it from the live MPIDR_EL1.
+        state = 'running' if phys_id == default_boot_phys else 'stopped'
         cn = node(f'cpu{i}', [
             ph(),
             ('device_type', cstr('cpu')),

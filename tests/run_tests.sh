@@ -334,6 +334,35 @@ if seq not in patch:
 PY
 echo "ok   0156 unlinks comma-separated sweetrm paths in the kernel context before init"
 
+echo "== OXY-08: each board lists its ABL boot core first, so cpus=8 keeps ==
+==          the boot CPU logical 0 and starts the other 7 via PSCI       =="
+tmpadt=$(mktemp -d)
+python3 tools/mkadt.py "$tmpadt/oxygen.adt" --board oxygen --native >/dev/null 2>&1
+python3 tools/mkadt.py "$tmpadt/santoni.adt" --board santoni --native >/dev/null 2>&1
+python3 - "$tmpadt/oxygen.adt" "$tmpadt/santoni.adt" <<'PY'
+import struct, sys
+sys.path.insert(0, "tools")
+import adt
+want = {
+    "oxygen": ([0x0, 0x1, 0x2, 0x3, 0x100, 0x101, 0x102, 0x103], 0x0),
+    "santoni": ([0x100, 0x101, 0x102, 0x103, 0x0, 0x1, 0x2, 0x3], 0x100),
+}
+for path, (order, boot) in zip(sys.argv[1:], (want["oxygen"], want["santoni"])):
+    root = adt.parse(adt.load(path))[0]
+    cpus = next(n for n in root.children if n.name == "cpus")
+    regs = [struct.unpack("<I", c.prop("reg"))[0] for c in cpus.children]
+    if regs != order:
+        sys.exit(f"{path}: CPU order {[hex(r) for r in regs]} != {[hex(r) for r in order]}")
+    states = [c.prop("state").split(b"\0")[0] for c in cpus.children]
+    if states[0] != b"running" or any(s != b"stopped" for s in states[1:]):
+        sys.exit(f"{path}: unexpected default CPU states {states}")
+    if order[0] != boot:
+        sys.exit(f"{path}: boot core is not first")
+print("ok   oxygen starts with 0x0, santoni with 0x100; others stopped")
+PY
+rm -rf "$tmpadt"
+echo "ok   mkadt.py board CPU order supports cpus=8 on oxygen"
+
 echo "== CI-01: Xcode 16 iig expects the kernel-side IORPC.kernelContent field (0146) =="
 python3 tools/check_patch.py "$P146" -q \
 	--added-contains 'iokit/IOKit/IORPC.h:#ifdef KERNEL' \
