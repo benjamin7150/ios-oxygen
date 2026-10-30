@@ -485,16 +485,35 @@
   clean; result byte-identical to the intended file (`d25121a8…`).
   `tests/run_tests.sh` adds **OXY-06** for the lock/bounce structure.
   Commit `642af20`, pushed to `benjamin7150/ios-oxygen` `ci-x64`.
-- **CI build `41048071461` (headSha `642af20`)** dispatched via
-  `gh workflow run xnu.yml` (OXYGEN / DEVELOPMENT / macos-15-intel).
-  **Next:** verify `0155` was applied (uploaded buildtree `santoni_sdhci.c`
-  matches `d25121a8…`, `check_patch.log` lists it), download the new kernel,
-  rebuild the boot image with `rebuild-realroot.sh`, and have the user boot
-  it. Then pull the sweetlog ring and check that `cs_validate_page`
-  mismatches, zero pages and `hfs_swap_BTNode` corruption are gone. Also
-  fixed `tools/sweet-log-pull.sh` to keep the `system`/`userdata` partition
-  name next to the resolved device path (the old `grep -q system` failed on
-  `/dev/block/mmcblk0p65` and read the wrong range).
+- **CI build `41048071461` (headSha `642af20`) SUCCESS, verified:** run
+  dispatched via `gh workflow run xnu.yml` (OXYGEN / DEVELOPMENT /
+  macos-15-intel). `check_patch.log` lists `0155` (3 hunks exact), the build
+  log has `Applying patch: .../0155-santoni-sdhci-bounce-race.patch`, and the
+  uploaded buildtree `santoni_sdhci.c` is byte-identical to the intended file
+  (`d25121a8…`), so dxb applied it. No `Skipping patch .../01xx-` lines.
+  Kernel `kernel.development.oxygen` SHA-256
+  `7a9b036b8f00cf88f36abd0634d5dab646906a586abb8dfd3e8ba14fefe304e9`
+  (17,332,000 B; SHA256SUMS OK; old 0154 kernel kept as
+  `kernel.development.oxygen.0154`, `4878a160…`).
+- **Boot images rebuilt with the unchanged shim half (`e698b1ef…`,
+  450,471 B):**
+  - normal: `shim-boot-realroot-0155.img` `78b84b6e…`, payload
+    `payload-realroot-0155.bin` `4e4b5868…` (16,723,552 B), cmdline
+    `realroot-cmdline.txt` (no sweetlog).
+  - diagnostic: `shim-boot-realroot-0155-sweetlog.img` `ac46d5c4…`, payload
+    `payload-realroot-0155-sweetlog.bin` `01591762…`, cmdline
+    `realroot-cmdline-sweetlog-csdebug.txt` (`sweetlog=1 cs_debug=6`).
+  The known-good 0154 image `shim-boot-realroot.img` is untouched
+  (`ee080651…`).
+- **Next:** user boots
+  `fastboot boot /home/moron/ios/oxygen-0148/shim-boot-realroot-0155-sweetlog.img`
+  (non-destructive; userdata unchanged), lets it run, then pulls the ring
+  from recovery. Check that the `cs_validate_page` hash mismatches, the
+  zero-page digests and `hfs_swap_BTNode` corruption are gone; if the boot is
+  clean, the normal 0155 image is the keeper. Also fixed
+  `tools/sweet-log-pull.sh` to keep the `system`/`userdata` partition name
+  next to the resolved device path (the old `grep -q system` failed on
+  `/dev/block/mmcblk0p65` and read the wrong range); commit `4a455c8`.
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 
