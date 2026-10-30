@@ -673,6 +673,66 @@
   cmdline `realroot-cmdline-sweetlog-rm.txt` (587 bytes, verified inside
   both the payload and the boot-image header), shim half unchanged
   (`e698b1ef…`, 450,471 B).
+- **0156 result: the assumed path was wrong.** The boot log shows all three
+  `sweetrm=` unlinks at lines 168-170 returning `2` (ENOENT), yet
+  containermanagerd still dies with `SQLITE_NOTADB` (26). The
+  `/private/var/installd/Library/Caches/com.apple.containermanagerd` string
+  belongs to the privileged/system container manager, not this database.
+- **0157 static re-analysis (2026-10-30):** `MCMCodeSigningMapping
+  codeSignMappingWithError:` builds the URL from
+  `[[MCMGlobalConfiguration sharedInstance].managedPathRegistry
+  containermanagerLibrary].url` + `containers` + `.sqlite3`.
+  `MCMGlobalConfiguration initWithRunMode:...` stores
+  `[MCMPOSIXUser currentPOSIXUser].homeDirectoryURL` and passes the same
+  `currentPOSIXUser` object to
+  `MCMManagedPathRegistry initWithDaemonUser:privileged:` (disassembly at
+  `0x1c4c8c3f8` -> `0x1c4c8c45c`). `_initPathPropertiesWithDaemonUser:`
+  creates `<home>`, `<home>/Library` and `<home>/Library/MobileContainerManager`
+  (ivars +0x20/+0x28/+0x30), and the `containermanagerLibrary` getter loads
+  +0x30. The launchd plist has no `UserName`, so the daemon runs as root and
+  the likely path is
+  `/private/var/root/Library/MobileContainerManager/containers.sqlite3`.
+  The donor image is a pristine IPSW (no app data, stock Preferences only),
+  so that runtime-created directory is correctly absent from the source
+  listing.
+- **0157 diagnostic + cleanup (2026-10-30):** the user confirmed deleting the
+  `/private/var/root` trio in the same boot. Patch
+  `0157-sweet-dbg-container-db-open.patch` adds
+  `sweet_dbg_container_db_open()` to `bsd/vfs/vfs_syscalls.c`: with
+  `sweetdbg=1`, every open by `containermanager*` whose path contains
+  `containers.sqlite3` or `MobileContainerManager` prints
+  `SWEET DBG: <comm> pid <pid> uid <uid> ruid <ruid> flags <flags> path <path>`.
+  It is called from both `openat_internal()` and
+  `openat_dprotected_internal()`, is read-only, and caches the boot-arg
+  check. The diagnostic cmdline is `realroot-cmdline-sweetlog-dbg.txt`
+  (`sweetdbg=1`, `sweetrm=` = the `/private/var/root` trio). CI run
+  `41080680665` (commit `53bf7ab`, macos-15-intel, `machine_config=OXYGEN`).
+- **0157 build + image (2026-10-30):** CI run `41080680665` succeeded;
+  `check_patch.log` reports `0157 ... 3 hunk(s), all hunk counts exact` and
+  the build log shows `Applying patch: .../0157-sweet-dbg-container-db-open.patch`
+  (the only skipped patches are the known upstream `iobuffermemd_monterey`,
+  `skywalk_sonoma`, `syntax_checker_sonoma` and `TrustCache`). Kernel
+  `kernel.development.oxygen.0157` SHA-256
+  `978db12ad26391c5c833b7990f6f1b01c6949b82bd3e1e896b2f179b776b353b`
+  (17,315,712 B); `strings` contains
+  `SWEET DBG: %s pid %d uid %u ruid %u flags 0x%x path %s` and the 0156
+  `SWEET CLEANUP: unlink %s -> %d`. Diagnostic image
+  `shim-boot-realroot-0157-dbg.img` SHA-256
+  `28e230fb6941a833a37c527e8b1c6366adc54c8fa847a6792fb0b5dc45420ab7`,
+  payload `payload-realroot-0157-dbg.bin`
+  `a121df33d007260afa85282f37fd25d5f9df613bc281c263c1189f4935acde02`,
+  cmdline 550 bytes (first 512 in the v0 header `cmdline`, remaining 38 in
+  `extra_cmdline`; full text also inside the payload), shim half unchanged
+  (450,471 B).
+- **Next action (needs the user's phone):** boot
+  `fastboot boot /home/moron/ios/oxygen-0148/shim-boot-realroot-0157-dbg.img`
+  and pull `/tmp/opencode/sweetlog-0157-dbg.txt` with
+  `ANDROID_SERIAL='Red_Wolf_(29d84c95)' /home/moron/ios/ios-santoni/tools/sweet-log-pull.sh /tmp/opencode/sweetlog-0157-dbg.txt`.
+  Expected: `SWEET CLEANUP: unlink /private/var/root/.../containers.sqlite3
+  -> 0` (the `-wal`/`-shm` may be `2`), a `SWEET DBG: containermanager ...`
+  line naming the real path/uid, and no containermanager SIGTRAP. If the
+  cleanup returns `2`, the DB is elsewhere; the `SWEET DBG` line gives the
+  exact path for a fresh-confirmation 0158 cleanup.
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 
