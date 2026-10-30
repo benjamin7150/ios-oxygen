@@ -767,14 +767,21 @@
   `sweetfb_panel_bgr24=1`, `sweetfb_noconsole=1`, `sweetdbg=1`; no
   `sweetrm=`, so a newly created DB is not deleted) matches both the v0 boot
   header and the payload.
-- **0158 result: FIRST iOS PIXELS ON OXYGEN (2026-10-30).** The user booted
-  `shim-boot-realroot-0158.img` and the panel shows the **Apple logo with the
-  data-migration progress bar underneath**, nearly full. This is the same
-  `com.apple.datamigrator` / backboardd ProgressUI screen santoni showed in
-  boot 0053s: iBoot is not in this chain, so the logo/bar can only come from
-  iOS userspace drawing through `IOMobileFramebuffer`. The 32bpp boot video
-  buffer + BGR24 `showFrame()` conversion works on hardware, and SpringBoard
-  no longer dies on the `0x0` `Main-External` display.
+- **0158 result: first pixels on oxygen (2026-10-30).** The user booted
+  `shim-boot-realroot-0158.img` and the panel shows an **Apple logo with a
+  progress bar underneath**, nearly full. The 32bpp boot video buffer +
+  BGR24 `showFrame()` path is therefore driving the panel. What is NOT yet
+  proven is which UI it is: XNU's own `vc_progress` boot meter also draws an
+  Apple logo + bar, and the iOS `com.apple.datamigrator` / backboardd
+  ProgressUI screen looks the same. A log is required to tell them apart.
+- **Why there is no 0158 log (2026-10-30):** `santoni_log_start()` returns
+  unless the boot arg `sweetlog=1` is present. The 0158/0159 cmdlines did not
+  include it, so the SYSTEM log ring still held the 0157 debug boot. Pulling
+  it produced a file byte-identical to `/tmp/opencode/sweetlog-0157-dbg.txt`
+  (SHA-256 `1c8a7bc0…`), including `SWEET FB: no boot framebuffer` and the
+  SpringBoard `0x0 Main-External` crash. `sweetlog=1` also feeds the serial
+  console's word filter, but `sweetfb_noconsole=1` mutes drawing, so the
+  persistent log still receives every line.
 - **Why the bar "hangs" near the end:** on santoni the same migration took
   ~60 minutes on `cpus=1` (99 % at ~30 min, then crawled), because backboardd
   presents the progress UI continuously and the kernel copies/converts a
@@ -784,12 +791,13 @@
   The 0158 kernel already batches swaps to `sweetfb_hz` (10 Hz default).
 - **30 Hz request (2026-10-30):** `sweetfb_hz=30` only changes the boot arg,
   so no kernel rebuild. Image `shim-boot-realroot-0158b-30hz.img` SHA-256
-  `1fa94b2223fa4c34138398bec31086f9833eb50b8d2e328fa05dfcdd092e0fe2`
+  `1287ac2a1a36336eabedaa8befa0d99118f4061355a602e9e0a80b7668e7c41a`
   (17,176,576 B), payload `payload-realroot-0158b.bin`
-  `a597966858ee2b6f844e9936f6affbd827471a002e54f2a04abfabb9c0894b30`,
-  cmdline `realroot-cmdline-0158b.txt` (30 Hz, `cpus` absent = 1 CPU). The
-  BGR24 conversion is CPU-bound; 30 Hz triples the per-second pixel work
-  versus 10 Hz, so it is better after the migration than during it.
+  `28e744c4df041db827f5b37d0e25e1c318c1b312bd3e27c47471fb7d15e07221`,
+  cmdline `realroot-cmdline-0158b.txt` (30 Hz, `cpus` absent = 1 CPU,
+  `sweetlog=1`). The BGR24 conversion is CPU-bound; 30 Hz triples the
+  per-second pixel work versus 10 Hz, so it is better after the migration
+  than during it.
 - **8-core feasibility (2026-10-30): YES, with one ADT fix.** The SweetCPU
   PSCI path already exists (santoni ran 6 A55 cores with `cpus=6`), and
   `SWEET_SMP_MAX_CPUS` is 8 for oxygen. The catch was `tools/mkadt.py`: it
@@ -797,26 +805,41 @@
   `cpus=8` the boot core `0x0` would become logical CPU 4 and
   `SweetCPU::startAll` would panic. `mkadt.py` now lists the board's boot
   cluster first (oxygen `0x0,0x1,0x2,0x3,0x100..0x103`; santoni unchanged)
-  and a new host test `OXY-08` checks both orders/states. Image
+  and a new host test `OXY-08` checks both orders/states. The stock oxygen
+  DTB also lists `cpu@0..3` (0x0-0x3) before `cpu@100..103`, so this matches
+  the firmware's own logical numbering. Image
   `shim-boot-realroot-0159-8core.img` SHA-256
-  `af4f6bd55f3f6e5271b15a590cd72df643ceea7aa38df1860ce7cd8799d38923`
+  `e6f6ad15e3306c00f20df8b0c82e4ab0f4deaac34ee3f4ccbc9ee8e4b4e77ea4`
   (17,176,576 B), payload `payload-realroot-0159.bin`
-  `ce7cedb584c204da4fa522591ee4fa5a876c1d6b5ab1ff356df2c4af4cdc118a`,
-  cmdline `realroot-cmdline-0159.txt` (`sweetfb_hz=30`, `cpus=8`), ADT
-  `oxygen-8core.adt` `8ff483847a0f1a685d0b75470dfdc261a6443c53285e4fe035c7589d0c8ba209`.
+  `89bc37da611322eb923e7f1942464a6e7be3fe4a858c4274f73007e1d782b93e`,
+  cmdline `realroot-cmdline-0159.txt` (`sweetfb_hz=30`, `cpus=8`,
+  `sweetlog=1`), ADT `oxygen-8core.adt`
+  `8ff483847a0f1a685d0b75470dfdc261a6443c53285e4fe035c7589d0c8ba209`.
   Embedded ADT verified: cpu0 `0x0 running`, cpu1-3 `0x1-0x3`, cpu4-7
   `0x100-0x103`, all stopped. Untested on oxygen hardware; expected log
   `SWEET CPU: requested=8 selected=8`, `cpu=1..7 ... came alive; SGI1 OK`,
   `8/8 CPUs initialized`. A secondary failure panics with
   `SWEET CPU: cpu=N startup timeout`, leaving 0158b as fallback.
-- **Next action (needs the user's phone):** if the migration bar is still
-  moving, let it finish and then pull the log. Otherwise power-cycle and boot
+- **GICv2 target-numbering risk (unverified):** the boot handshake only
+  exercises the self-SGI (`GICD_SGIR` filter 2). Cross-core IPIs
+  (`SweetCPU::signalCPU`) use target-list bit `1 << logical`. Santoni's
+  logical order (boot/gold cluster 0x100 first) worked with that, but oxygen
+  now numbers the little cluster 0x0-0x3 first. If MSM8953 wires GIC CPU
+  interfaces by cluster (gold = 0-3) rather than by DT order, cross-core
+  IPIs would hit the wrong cores and SMP would misbehave under load. The
+  0159 log should be checked for `cpu_signal`/hang symptoms; if that
+  happens, the fallback is to derive the target bit from the live mapping
+  or broadcast with the "all others" filter.
+- **Next action (needs the user's phone):** boot
   `fastboot boot /home/moron/ios/oxygen-0148/shim-boot-realroot-0159-8core.img`
-  to run the migration on 8 cores at 30 Hz (fallback:
-  `shim-boot-realroot-0158b-30hz.img`). Then pull
+  (fallback `shim-boot-realroot-0158b-30hz.img`) and let it run. Both now
+  carry `sweetlog=1`, so the SYSTEM ring will finally contain this boot.
+  After the run (or after a panic/reset), enter TWRP and pull
   `/tmp/opencode/sweetlog-0159.txt` with
-  `ANDROID_SERIAL='Red_Wolf_(29d84c95)' /home/moron/ios/ios-santoni/tools/sweet-log-pull.sh /tmp/opencode/sweetlog-0159.txt`
-  and check `SWEET CPU:` lines, datamigrator progress and any crash loop.
+  `ANDROID_SERIAL='Red_Wolf_(29d84c95)' /home/moron/ios/ios-santoni/tools/sweet-log-pull.sh /tmp/opencode/sweetlog-0159.txt`;
+  check `SWEET FB: BGR24 panel`, `SWEET CPU: requested=8 selected=8`,
+  `cpu=1..7 ... came alive; SGI1 OK`, `8/8 CPUs initialized`,
+  `exec com.apple.datamigrator`, and any crash loop.
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 
