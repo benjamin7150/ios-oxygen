@@ -653,6 +653,26 @@
   `containers.sqlite3`.
   `sweetrm=` is deliberately not present in the normal 0156 cmdline, so a
   later normal boot never deletes a healthy DB.
+- **0156 CI + image (2026-10-30):** the workflow now defaults to the
+  `macos-15-intel` runner (`bdf6a94`); a dispatch for oxygen must still pass
+  `-f machine_config=OXYGEN` explicitly (the default input remains
+  `SANTONI`). CI run `41064471505` (commit `bdf6a94`, macos-15-intel,
+  Xcode 16, `machine_config=OXYGEN`) succeeded, applied 0156, and produced
+  `kernel.development.oxygen` SHA-256
+  `f22c3463159858c84ab86b534911994470b16060cee6b2de475f826a740f1146`
+  (0155 kernel preserved as `kernel.development.oxygen.0155`,
+  `7a9b036b…`). The downloaded buildtree's `bsd/kern/bsd_init.c` is
+  byte-identical to the edited source. Disassembly of the new kernel shows
+  `bsdinit_task` inlining the cleanup: `PE_parse_boot_argn("sweetrm", ...)`,
+  the `unlink1(vfs_context_kernel(), NULLVP, path, UIO_SYSSPACE, 0)` loop,
+  `printf("SWEET CLEANUP: ...")`, then `load_init_program(p)`. Diagnostic
+  image: `shim-boot-realroot-0156-rm.img` SHA-256
+  `20a27ee11c49f4d1e637755b6fcdc72e6128d1824d6e7ad152aa08517ba88cc4`,
+  payload `payload-realroot-0156-rm.bin`
+  `dc952bb46b5f8b185ace38bbbc57b7d2720d100c1a415d44a1c261c811245b21`,
+  cmdline `realroot-cmdline-sweetlog-rm.txt` (587 bytes, verified inside
+  both the payload and the boot-image header), shim half unchanged
+  (`e698b1ef…`, 450,471 B).
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 
