@@ -1,0 +1,68 @@
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -94,6 +94,7 @@
+ #include <sys/systm.h>
+ #include <sys/mman.h>
+ #include <sys/kasl.h>
++#include <sys/uio.h>
+ 
+ #include <security/audit/audit.h>
+ 
+@@ -1072,6 +1073,47 @@
+ 	bsd_init_kprintf("done\n");
+ }
+ 
++/*
++ * SWEET: one-shot boot-time file removal.
++ *
++ * "sweetrm=" is a comma-separated list of absolute paths that are unlinked
++ * immediately before launchd starts.  It exists to drop state corrupted by
++ * an earlier kernel bug (for example the containermanagerd SQLite database
++ * damaged by the pre-0155 SDHCI bounce race) without reflashing userdata.
++ * Only the boot argument supplies the paths, and removal runs once, before
++ * any user process can create or open the files.
++ */
++extern int unlink1(vfs_context_t, vnode_t, user_addr_t, enum uio_seg, int);
++
++static void
++sweet_boot_remove_files(void)
++{
++	char list[1024];
++	char *cursor = list;
++
++	if (!PE_parse_boot_argn("sweetrm", list, sizeof(list))) {
++		return;
++	}
++
++	while (*cursor != '\0') {
++		char *path = cursor;
++		int error;
++
++		cursor = strchr(cursor, ',');
++		if (cursor != NULL) {
++			*cursor++ = '\0';
++		} else {
++			cursor = path + strlen(path);
++		}
++		if (*path == '\0') {
++			continue;
++		}
++		error = unlink1(vfs_context_kernel(), NULLVP,
++		    CAST_USER_ADDR_T(path), UIO_SYSSPACE, 0);
++		printf("SWEET CLEANUP: unlink %s -> %d\n", path, error);
++	}
++}
++
+ void
+ bsdinit_task(void)
+ {
+@@ -1098,6 +1140,8 @@
+ 
+ 	bsd_init_kprintf("bsd_do_post - done");
+ 
++	sweet_boot_remove_files();
++
+ 	load_init_program(p);
+ 	lock_trace = 1;
+ }

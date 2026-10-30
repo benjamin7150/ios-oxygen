@@ -634,6 +634,25 @@
   preserve the corrupt file for forensics if preferred. After the repair,
   verify the new `containers.sqlite3` header is `SQLite format 3\0` and that
   containermanagerd survives.
+- **0156 implemented (2026-10-30):** the user approved deleting the corrupt
+  DB trio. `xnu/patches/0156-sweet-boot-rm-corrupt-db.patch` adds
+  `sweet_boot_remove_files()` to `bsd/kern/bsd_init.c`. It parses the
+  comma-separated `sweetrm=` boot argument with `PE_parse_boot_argn()`, then
+  calls `unlink1(vfs_context_kernel(), NULLVP, CAST_USER_ADDR_T(path),
+  UIO_SYSSPACE, 0)` for each absolute path and prints
+  `SWEET CLEANUP: unlink <path> -> <errno>`. It is called in
+  `bsdinit_task()` immediately before `load_init_program(p)`, so the removal
+  happens once, after the root is mounted read-write and before launchd or
+  containermanagerd can run. Regression test `OXY-07` checks the parser,
+  the kernel-context `unlink1()` call and the call ordering. The diagnostic
+  image's cmdline must include
+  `sweetrm=/private/var/installd/Library/Caches/com.apple.containermanagerd/containers.sqlite3,/private/var/installd/Library/Caches/com.apple.containermanagerd/containers.sqlite3-wal,/private/var/installd/Library/Caches/com.apple.containermanagerd/containers.sqlite3-shm`.
+  Success criterion: `SWEET CLEANUP: unlink .../containers.sqlite3 -> 0`
+  (the `-wal` and `-shm` siblings may legitimately return `-2`/ENOENT), no
+  containermanagerd SIGTRAP, and a fresh `SQLite format 3` header in
+  `containers.sqlite3`.
+  `sweetrm=` is deliberately not present in the normal 0156 cmdline, so a
+  later normal boot never deletes a healthy DB.
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 

@@ -26,6 +26,7 @@ P146="xnu/patches/0146-iig-kernelcontent.patch"
 P147="xnu/patches/0147-oxygen-sweet-boot-cpu.patch"
 P148="xnu/patches/0148-sweet-hfs-sysctl-macros.patch"
 P155="xnu/patches/0155-santoni-sdhci-bounce-race.patch"
+P156="xnu/patches/0156-sweet-boot-rm-corrupt-db.patch"
 
 echo "== host unit tests (-Wall -Wextra) =="
 for t in test_sdhci_mock test_gpt_parser test_log_ring; do
@@ -315,6 +316,23 @@ python3 tools/check_patch.py "$P155" -q \
 	--added-contains 'bsd/dev/santoni_sdhci.c:kmem_free(kernel_map, user_bounce, user_bounce_size);' \
 	--added-lacks 'bsd/dev/santoni_sdhci.c:char *bounce = (char *)(se.dma + DMA_BOUNCE);'
 echo "ok   0155 serializes shared-bounce PIO+copy and isolates user copyin/copyout"
+
+echo "== OXY-07: sweetrm= unlinks boot-arg paths once, before launchd (0156) =="
+python3 tools/check_patch.py "$P156" -q \
+	--added-contains 'bsd/kern/bsd_init.c:#include <sys/uio.h>' \
+	--added-contains 'bsd/kern/bsd_init.c:PE_parse_boot_argn("sweetrm", list, sizeof(list))' \
+	--added-contains 'bsd/kern/bsd_init.c:error = unlink1(vfs_context_kernel(), NULLVP,' \
+	--added-contains 'bsd/kern/bsd_init.c:CAST_USER_ADDR_T(path), UIO_SYSSPACE, 0);' \
+	--added-contains 'bsd/kern/bsd_init.c:printf("SWEET CLEANUP: unlink %s -> %d\n", path, error);' \
+	--added-contains 'bsd/kern/bsd_init.c:sweet_boot_remove_files();'
+python3 - "$P156" <<'PY'
+import sys
+patch = open(sys.argv[1], encoding="utf-8").read()
+seq = "+\tsweet_boot_remove_files();\n+\n \tload_init_program(p);"
+if seq not in patch:
+    sys.exit("0156: sweet_boot_remove_files() is not immediately before load_init_program()")
+PY
+echo "ok   0156 unlinks comma-separated sweetrm paths in the kernel context before init"
 
 echo "== CI-01: Xcode 16 iig expects the kernel-side IORPC.kernelContent field (0146) =="
 python3 tools/check_patch.py "$P146" -q \
