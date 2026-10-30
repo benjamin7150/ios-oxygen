@@ -724,15 +724,57 @@
   cmdline 550 bytes (first 512 in the v0 header `cmdline`, remaining 38 in
   `extra_cmdline`; full text also inside the payload), shim half unchanged
   (450,471 B).
+- **0157 result (2026-10-30, booted by the user):** the SQLite blocker is
+  resolved. `SWEET CLEANUP` returned `0` for
+  `/private/var/root/Library/MobileContainerManager/containers.sqlite3`, `0`
+  for `-wal` and `2` (ENOENT) for `-shm`, and `SWEET DBG: containermanager
+  pid 64 uid 0 ruid 0 ... path /private/var/root/Library/MobileContainerManager/...`
+  confirms the daemon path/credentials. containermanagerd no longer crashes
+  (no `CRASH containermanager`); iOS userspace runs through SpringBoard,
+  backboardd, runningboardd and dozens of daemons. Log:
+  `/tmp/opencode/sweetlog-0157-dbg.txt`.
+- **Next blocker = display, not userspace (0157 log):** `SWEET FB: no boot
+  framebuffer`. `AppleCLCD::start()` rejected the ABL splash because it
+  requires `v_rowBytes >= v_width * 4` (3240 < 4320). SpringBoard therefore
+  saw only `Main-External`/`wireless0` with `0x0` bounds and asserted in
+  `SBMainDisplayConfigurationTransformer.m:62`.
+- **0158 display fix (2026-10-30):** the shim now hands XNU a separate 32bpp
+  BGRA boot-video buffer at `0x90800000` (stride 4320, inside the 20 MiB
+  cont-splash carve-out), while the ABL panel buffer stays packed BGR24 at
+  `0x90001000` stride 3240 and keeps scanning. `SweetFramebuffer.cpp` maps the
+  panel (`fPanelBGR24`, default on for `OXYGEN`, overridable with
+  `sweetfb_panel_bgr24`), converts every presented frame with `showFrame()`
+  (BGRA -> BGR24, 32-bit stores), and skips the wrong-for-MSM8953 topaz
+  MDP/DSI/INTF mappings when the ABL panel is already scanned. Console shadow,
+  flip buffers and fade snapshot use the 32bpp path.
+- **0158 build + image (2026-10-30):** CI run `41093106082` (commit `b5f4c0a`,
+  macos-15-intel, `machine_config=OXYGEN`) succeeded; `check_patch.log`
+  reports `0158 ... 14 hunk(s), all hunk counts exact`. Kernel
+  `artifact-0158/kernel.development.oxygen` SHA-256
+  `d8e64e14195d28153010b00374d6ea59c6002247c630b7e8d69d41fc604e7be1`
+  (17,332,144 B); `strings` contains `SWEET FB: BGR24 panel ...` and
+  `sweetfb_panel_bgr24`. Rebuilt shim `Image` (180,224 B) SHA-256
+  `706aa33616de9d6f6097fd32633610342ba50692dc72364ca48fa15fda73b8dd`,
+  shim kernel half (Image + oxygen DTB, 450,471 B) SHA-256
+  `6179a6517b6197d7938caecebbf84a7a21e446876157a295ccd286b7784fe84f`;
+  disassembly of `loader_boot` shows `0x90800000`, stride `0x10e0`,
+  1080x1920, depth 32. Boot image
+  `shim-boot-realroot-0158.img` SHA-256
+  `6e93dbe62a8bf99f7ec2d59559d0a6622dabaf27b1279c23969fd95152d5e150`
+  (17,176,576 B), payload `payload-realroot-0158.bin` SHA-256
+  `fbfce7cb43285e7584fb2c3e636b3a082445bd57c2717f22c507edd3e85e5c63`.
+  Cmdline `realroot-cmdline-0158.txt` (`sweetfb_hz=10`,
+  `sweetfb_panel_bgr24=1`, `sweetfb_noconsole=1`, `sweetdbg=1`; no
+  `sweetrm=`, so a newly created DB is not deleted) matches both the v0 boot
+  header and the payload.
 - **Next action (needs the user's phone):** boot
-  `fastboot boot /home/moron/ios/oxygen-0148/shim-boot-realroot-0157-dbg.img`
-  and pull `/tmp/opencode/sweetlog-0157-dbg.txt` with
-  `ANDROID_SERIAL='Red_Wolf_(29d84c95)' /home/moron/ios/ios-santoni/tools/sweet-log-pull.sh /tmp/opencode/sweetlog-0157-dbg.txt`.
-  Expected: `SWEET CLEANUP: unlink /private/var/root/.../containers.sqlite3
-  -> 0` (the `-wal`/`-shm` may be `2`), a `SWEET DBG: containermanager ...`
-  line naming the real path/uid, and no containermanager SIGTRAP. If the
-  cleanup returns `2`, the DB is elsewhere; the `SWEET DBG` line gives the
-  exact path for a fresh-confirmation 0158 cleanup.
+  `fastboot boot /home/moron/ios/oxygen-0148/shim-boot-realroot-0158.img`.
+  Expected: `SWEET FB: BGR24 panel 1080x1920 stride 3240`, then
+  `SWEET FB: AppleCLCD 1080x1920 ...`, no `SWEET FB: no boot framebuffer`,
+  and no SpringBoard `SBMainDisplayConfigurationTransformer` assertion. Then
+  pull `/tmp/opencode/sweetlog-0158.txt` with
+  `ANDROID_SERIAL='Red_Wolf_(29d84c95)' /home/moron/ios/ios-santoni/tools/sweet-log-pull.sh /tmp/opencode/sweetlog-0158.txt`
+  and check for the first rendered frame or the next blocker.
 
 ## oxygen (2026-10-29, active): real-root reaches launchd - dyld shared cache not found
 
