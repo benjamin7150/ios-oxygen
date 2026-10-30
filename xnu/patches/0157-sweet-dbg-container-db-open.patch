@@ -1,0 +1,72 @@
+diff --git a/bsd/vfs/vfs_syscalls.c b/bsd/vfs/vfs_syscalls.c
+--- a/bsd/vfs/vfs_syscalls.c
++++ b/bsd/vfs/vfs_syscalls.c
+@@ -4941,6 +4941,50 @@
+ }
+ 
+ /*
++ * SWEET: temporary diagnostic for the containermanagerd SQLite database
++ * corruption.  With "sweetdbg" in the boot arguments, log every open issued
++ * by a containermanager process whose path names the container manager
++ * database, together with the credentials that select its home directory.
++ * Read-only; the open itself is not changed.
++ */
++static void
++sweet_dbg_container_db_open(vfs_context_t ctx, user_addr_t path, int flags,
++    enum uio_seg segflg)
++{
++	static int enabled = -1;
++	proc_t p = vfs_context_proc(ctx);
++	kauth_cred_t cred;
++	char arg[8];
++	char name[256];
++	size_t len = 0;
++
++	if (p == NULL || strncmp(p->p_comm, "containermanager", 16) != 0) {
++		return;
++	}
++	if (enabled < 0) {
++		enabled = PE_parse_boot_argn("sweetdbg", arg, sizeof(arg)) ? 1 : 0;
++	}
++	if (!enabled) {
++		return;
++	}
++	if (segflg == UIO_USERSPACE) {
++		if (copyinstr(path, name, sizeof(name), &len) != 0) {
++			return;
++		}
++	} else {
++		strlcpy(name, (const char *)path, sizeof(name));
++	}
++	if (strnstr(name, "containers.sqlite3", sizeof(name)) == NULL &&
++	    strnstr(name, "MobileContainerManager", sizeof(name)) == NULL) {
++		return;
++	}
++	cred = vfs_context_ucred(ctx);
++	printf("SWEET DBG: %s pid %d uid %u ruid %u flags 0x%x path %s\n",
++	    p->p_comm, p->p_pid, kauth_cred_getuid(cred),
++	    kauth_cred_getruid(cred), (unsigned)flags, name);
++}
++
++/*
+  * Go through the data-protected atomically controlled open (2)
+  *
+  * int open_dprotected_np(user_addr_t path, int flags, int class, int dpflags, int mode)
+@@ -4959,6 +5003,8 @@
+ 	int error;
+ 	struct filedesc *fdp = &vfs_context_proc(ctx)->p_fd;
+ 
++	sweet_dbg_container_db_open(ctx, path, flags, segflg);
++
+ 	VATTR_INIT(&va);
+ 	/* Mask off all but regular access permissions */
+ 	cmode = ((mode & ~fdp->fd_cmask) & ALLPERMS) & ~S_ISTXT;
+@@ -5044,6 +5090,8 @@
+ 	int cmode;
+ 	int error;
+ 
++	sweet_dbg_container_db_open(ctx, path, flags, segflg);
++
+ 	__open_data = kalloc_type(typeof(*__open_data), Z_WAITOK);
+ 	vap = &__open_data->va;
+ 	ndp = &__open_data->nd;
